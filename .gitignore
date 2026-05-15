@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Notebooks — output stripped before commit (nbstripout), but keep checkpoints out
+.ipynb_checkpoints/
+
+# Data and model artifacts — don't commit these to git, they live in Kaggle Datasets
+*.pth
+*.pt
+*.ckpt
+*.tiff
+*.tif
+*.png
+*.jpg
+*.jpeg
+data/train_images/
+data/test_images/
+data/train_tiles/
+data/raw/
+data/processed/
+
+# but DO commit our fold split
+!data/train_folds.csv
+
+# Local config
+.env
+*.local
+
+# IDE
+.vscode/
+.idea/
+.DS_Store
