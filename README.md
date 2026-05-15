@@ -1,6 +1,6 @@
 # PANDA — AIMI 2526 project
 
-Re-implementation and ablation study of the 1st-place approach for the [Kaggle PANDA challenge](https://www.kaggle.com/c/prostate-cancer-grade-assessment) (Prostate cANcer graDe Assessment). Final project for the AI in Medical Imaging course (NWI-IMC037) at Radboud University, spring 2026.
+Final project for the AI in Medical Imaging course (NWI-IMC037) at Radboud University, spring 2026.
 
 ## What this is
 
