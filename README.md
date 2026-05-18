@@ -90,9 +90,4 @@ Expected output: `effnetb0_fold0.pth` in `/kaggle/working` with val QWK ≈ 0.70
 | _[name]_ | Data pipeline | `src/dataset.py`, `src/tiles.py` (TBA), tile preprocessing |
 | _[name]_ | Model & training | `src/model.py`, `src/train.py` |
 | _[name]_ | Eval & external validation | `src/eval.py`, `src/inference.py`, external validation |
-
-Supervisor: Colin Jacobs (`colin.jacobs@ru.nl`).
-
-## License
-
-MIT. Note the [1st-place reference repo](https://github.com/kentaroy47/Kaggle-PANDA-1st-place-solution) is CC-BY-NC 4.0; our code is an independent implementation following the ideas described in their writeup, not a derivative work.
+following the ideas described in their writeup, not a derivative work.
