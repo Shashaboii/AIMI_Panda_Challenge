@@ -56,6 +56,8 @@ class ConcatTilePoolingModel(nn.Module):
         )
 
     def forward(self, x):
+        if x.ndim != 5:
+            raise ValueError(f'Expected tile input [B, N, C, H, W], got shape {tuple(x.shape)}')
         batch_size, n_tiles, channels, height, width = x.shape
         x = x.reshape(batch_size * n_tiles, channels, height, width)
         features = self.backbone(x).reshape(batch_size, n_tiles, -1)

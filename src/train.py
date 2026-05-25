@@ -4,8 +4,9 @@ evaluates on the held-out fold from `data/train_folds.csv`, saves weights,
 and prints final QWK.
 
 Usage:
-    python3 -m src.train --fold 0 --image-dir data/train_folds.csv --epochs 6
-    python -m src.train --fold 0 --tile-dir /path/to/tile_artifacts --epochs 6
+    python3 -m src.train --fold 0 --image-dir /path/to/train_images --epochs 6
+    python3 -m src.train --fold 0 --tile-dir /path/to/tile_artifacts \
+        --n-tiles 36 --tile-size 192 --epochs 6
 """
 import argparse
 import os
@@ -74,16 +75,38 @@ def make_datasets(train_df, val_df, args):
 def make_model(args):
     out_dim = 5 if args.loss == 'ordinal' else 1
     if use_tiles(args):
-        return ConcatTilePoolingModel(args.backbone, pretrained=True, out_dim=out_dim)
-    return EfficientNetBaseline(args.backbone, pretrained=True, out_dim=out_dim)
+        return ConcatTilePoolingModel(
+            args.backbone,
+            pretrained=True,
+            dropout=args.dropout,
+            out_dim=out_dim,
+        )
+    return EfficientNetBaseline(
+        args.backbone,
+        pretrained=True,
+        dropout=args.dropout,
+        out_dim=out_dim,
+    )
+
+
+def auto_feature_tag(args):
+    if args.feature_tag:
+        return args.feature_tag
+    if not use_tiles(args):
+        return None
+    parts = ['tiles']
+    if args.n_tiles is not None:
+        parts[0] = f'tiles{args.n_tiles}'
+    if args.tile_size is not None:
+        parts.append(f'imsize{args.tile_size}')
+    return '_'.join(parts)
 
 
 def make_weight_path(args):
     parts = [args.backbone.replace('-', '')]
-    if args.feature_tag:
-        parts.append(args.feature_tag)
-    elif use_tiles(args):
-        parts.append('tiles')
+    feature_tag = auto_feature_tag(args)
+    if feature_tag is not None:
+        parts.append(feature_tag)
     if args.loss != 'smoothl1':
         parts.append(args.loss)
     parts.append(f'fold{args.fold}')
@@ -107,7 +130,7 @@ def make_targets(y, args):
 
 def outputs_to_preds(out, args):
     if args.loss == 'ordinal':
-        return (out > 0).sum(dim=1).cpu().numpy()
+        return (torch.sigmoid(out) > 0.5).sum(dim=1).cpu().numpy()
     return out.cpu().numpy()
 
 
@@ -116,18 +139,24 @@ def main():
     ap.add_argument('--fold', type=int, required=True,
                     help='Which fold to hold out (0..4). Trains on the other 4.')
     ap.add_argument('--folds-csv', default='data/train_folds.csv')
-    ap.add_argument('--image-dir',
-                    help='Directory containing baseline slide PNGs')
-    ap.add_argument('--tile-dir',
-                    help='Directory containing one tile artifact per slide')
+    input_group = ap.add_mutually_exclusive_group(required=True)
+    input_group.add_argument('--image-dir',
+                             help='Directory containing baseline slide PNGs')
+    input_group.add_argument('--tile-dir',
+                             help='Directory containing one tile artifact per slide')
     ap.add_argument('--epochs', type=int, default=6)
     ap.add_argument('--batch-size', type=int, default=16)
     ap.add_argument('--num-workers', type=int, default=2)
     ap.add_argument('--lr', type=float, default=3e-4)
     ap.add_argument('--backbone', default='efficientnet-b0')
+    ap.add_argument('--dropout', type=float, default=0.3)
     ap.add_argument('--loss', choices=['smoothl1', 'mse', 'ordinal'], default='smoothl1')
+    ap.add_argument('--n-tiles', type=int,
+                    help='Tile count metadata for experiment naming, e.g. 36')
+    ap.add_argument('--tile-size', type=int,
+                    help='Tile size metadata for experiment naming, e.g. 192')
     ap.add_argument('--feature-tag',
-                    help='Optional experiment tag, e.g. tiles36_imsize192')
+                    help='Optional experiment tag. Overrides the auto-generated tile tag.')
     ap.add_argument('--output-dir', default='outputs',
                     help='Where to save weights')
     ap.add_argument('--seed', type=int, default=42)
@@ -137,16 +166,27 @@ def main():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f'Device: {device}')
     data_dir = get_data_dir(args)
-    if data_dir is None:
-        raise ValueError('Pass --image-dir for baseline training or --tile-dir for tile training.')
     print('Validation: held-out fold QWK from the fold CSV, not Kaggle scoring.')
+    print(
+        'Config:',
+        f'backbone={args.backbone}',
+        f'loss={args.loss}',
+        f'dropout={args.dropout}',
+        f'feature_tag={auto_feature_tag(args)}',
+    )
 
     df = pd.read_csv(args.folds_csv)
     df = filter_existing_rows(df, data_dir)
+    if len(df) == 0:
+        raise RuntimeError(f'No usable slides found in {data_dir}')
     print(f'{len(df)} slides usable')
 
     train_df = df[df.fold != args.fold].reset_index(drop=True)
     val_df = df[df.fold == args.fold].reset_index(drop=True)
+    if len(train_df) == 0 or len(val_df) == 0:
+        raise RuntimeError(
+            f'Fold {args.fold} has train={len(train_df)} and val={len(val_df)} after filtering'
+        )
     print(f'fold {args.fold}: train={len(train_df)}  val={len(val_df)}')
 
     train_ds, val_ds = make_datasets(train_df, val_df, args)
