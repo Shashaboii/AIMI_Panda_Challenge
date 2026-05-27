@@ -19,21 +19,46 @@ import torch.nn as nn
 from efficientnet_pytorch import EfficientNet
 
 
+def _build_backbone(backbone_name='efficientnet-b0', pretrained=True):
+    if pretrained:
+        backbone = EfficientNet.from_pretrained(backbone_name)
+    else:
+        backbone = EfficientNet.from_name(backbone_name)
+    in_features = backbone._fc.in_features
+    backbone._fc = nn.Identity()
+    return backbone, in_features
+
+
 class EfficientNetBaseline(nn.Module):
     """Baseline: single-image input, regression output."""
-    def __init__(self, backbone_name='efficientnet-b0', pretrained=True, dropout=0.3):
+    def __init__(self, backbone_name='efficientnet-b0', pretrained=True,
+                 dropout=0.3, out_dim=1):
         super().__init__()
-        if pretrained:
-            self.backbone = EfficientNet.from_pretrained(backbone_name)
-        else:
-            self.backbone = EfficientNet.from_name(backbone_name)
-        in_features = self.backbone._fc.in_features
-        self.backbone._fc = nn.Identity()
+        self.backbone, in_features = _build_backbone(backbone_name, pretrained)
         self.head = nn.Sequential(
             nn.Dropout(dropout),
-            nn.Linear(in_features, 1),
+            nn.Linear(in_features, out_dim),
         )
 
     def forward(self, x):
-        features = self.backbone(x)
-        return self.head(features).squeeze(-1)
+        return self.head(self.backbone(x)).squeeze(-1)
+
+
+class ConcatTilePoolingModel(nn.Module):
+    """Tile model: pool backbone features across N tiles per slide."""
+    def __init__(self, backbone_name='efficientnet-b0', pretrained=True,
+                 dropout=0.3, out_dim=1):
+        super().__init__()
+        self.backbone, in_features = _build_backbone(backbone_name, pretrained)
+        self.head = nn.Sequential(
+            nn.Dropout(dropout),
+            nn.Linear(in_features, out_dim),
+        )
+
+    def forward(self, x):
+        if x.ndim != 5:
+            raise ValueError(f'Expected tile input [B, N, C, H, W], got shape {tuple(x.shape)}')
+        batch_size, n_tiles, channels, height, width = x.shape
+        x = x.reshape(batch_size * n_tiles, channels, height, width)
+        features = self.backbone(x).reshape(batch_size, n_tiles, -1)
+        return self.head(features.mean(dim=1)).squeeze(-1)
