@@ -21,7 +21,12 @@ def _pin_memory_for(device):
 def infer_out_dim(state_dict):
     """Infer whether saved weights are regression (1) or ordinal (5)."""
     for key, value in state_dict.items():
-        if key.endswith('head.1.weight') or key.endswith('head.weight'):
+        if (
+            key == 'head.1.weight'
+            or key.endswith('.head.1.weight')
+            or key == 'head.weight'
+            or key.endswith('.head.weight')
+        ):
             return int(value.shape[0])
     raise KeyError('Could not infer output dimension from saved weights')
 
