@@ -24,12 +24,9 @@ import os
 import numpy as np
 import pandas as pd
 import torch
-from torch.utils.data import DataLoader
-from tqdm import tqdm
 
-from src.dataset import PandaDataset
-from src.eval import qwk, round_preds
-from src.model import EfficientNetBaseline
+from src.eval import mean_std_str, qwk, round_preds
+from src.inference import load_model, predict_oof
 
 
 def main():
@@ -42,7 +39,10 @@ def main():
     ap.add_argument('--output-csv', default='oof_predictions.csv')
     ap.add_argument('--backbone', default='efficientnet-b0')
     ap.add_argument('--batch-size', type=int, default=16)
+    ap.add_argument('--num-workers', type=int, default=2)
     ap.add_argument('--n-folds', type=int, default=5)
+    ap.add_argument('--model-kind', choices=['baseline', 'tiles'], default='baseline')
+    ap.add_argument('--ordinal-mode', choices=['threshold', 'expected'], default='threshold')
     args = ap.parse_args()
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -54,6 +54,7 @@ def main():
     print(f'{len(df)} usable slides')
 
     fold_qwks = []
+    processed_folds = []
     oof_rows = []
 
     for fold in range(args.n_folds):
@@ -68,25 +69,26 @@ def main():
             print(f'WARN: fold {fold} val set is empty, skipping')
             continue
 
-        # Load model with pretrained=False (we're loading saved weights, not ImageNet)
-        model = EfficientNetBaseline(args.backbone, pretrained=False).to(device).eval()
-        state = torch.load(weight_file, map_location=device)
-        model.load_state_dict(state)
-
-        ds = PandaDataset(val_df, args.image_dir, train=False)
-        loader = DataLoader(ds, batch_size=args.batch_size, shuffle=False,
-                            num_workers=2, pin_memory=True)
-
-        preds = []
-        with torch.no_grad():
-            for xb, _ in tqdm(loader, desc=f'fold {fold}'):
-                xb = xb.to(device, non_blocking=True)
-                preds.append(model(xb).cpu().numpy())
-        preds = np.concatenate(preds)
+        model = load_model(
+            weight_file,
+            backbone=args.backbone,
+            device=device,
+            model_kind=args.model_kind,
+        )
+        preds = predict_oof(
+            model,
+            val_df,
+            args.image_dir,
+            device,
+            batch_size=args.batch_size,
+            num_workers=args.num_workers,
+            ordinal_mode=args.ordinal_mode,
+        )
         targs = val_df.isup_grade.values.astype(int)
 
-        fold_qwk = qwk(preds, targs)
+        fold_qwk = qwk(preds, targs, ordinal_mode=args.ordinal_mode)
         fold_qwks.append(fold_qwk)
+        processed_folds.append(fold)
         print(f'fold {fold}: val_QWK = {fold_qwk:.4f}  (n={len(val_df)})')
 
         # Store per-slide OOF rows
@@ -104,16 +106,20 @@ def main():
 
     fold_qwks = np.array(fold_qwks)
     print('\n=== 5-fold summary ===')
-    for i, q in enumerate(fold_qwks):
-        print(f'  fold {i}: {q:.4f}')
-    print(f'  mean ± std: {fold_qwks.mean():.4f} ± {fold_qwks.std():.4f}')
+    for fold, q in zip(processed_folds, fold_qwks):
+        print(f'  fold {fold}: {q:.4f}')
+    print(f'  mean ± std: {mean_std_str(fold_qwks)}')
 
     oof_df = pd.DataFrame(oof_rows)
     oof_df.to_csv(args.output_csv, index=False)
     print(f'\nOOF predictions written to {args.output_csv} ({len(oof_df)} rows)')
 
     # Also report the global OOF QWK (all slides pooled), not just per-fold mean
-    global_qwk = qwk(oof_df.pred_raw.values, oof_df.isup_grade.values)
+    global_qwk = qwk(
+        oof_df.pred_raw.values,
+        oof_df.isup_grade.values,
+        ordinal_mode=args.ordinal_mode,
+    )
     print(f'Global OOF QWK (pooled across folds): {global_qwk:.4f}')
 
 
