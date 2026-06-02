@@ -83,6 +83,33 @@ python -m src.train \
 
 Expected output: `effnetb0_fold0.pth` in `/kaggle/working` with val QWK ≈ 0.70.
 
+## Latest baseline result
+
+Clean 5-fold baseline rerun on the xhlulu 512x512 thumbnail dataset:
+
+- Backbone: EfficientNet-B0
+- Loss: SmoothL1
+- Dropout: 0.3
+- Epochs: 6 per fold
+- Data split: shared 5-fold split in `data/train_folds.csv`
+
+Fold validation QWKs:
+
+```text
+fold 0: 0.7117
+fold 1: 0.7047
+fold 2: 0.7294
+fold 3: 0.6980
+fold 4: 0.7142
+mean ± std: 0.7116 ± 0.0106
+global OOF QWK: 0.7116
+```
+
+OOF predictions were written to `/kaggle/working/efficientnetb0_oof_predictions.csv`
+with 10,616 rows. The confusion matrix shows most errors are near-misses between
+adjacent grades, with the strongest performance on ISUP 0 and the weakest
+performance on ISUP 5.
+
 ## Team
 
 | Person | Track | Files |
