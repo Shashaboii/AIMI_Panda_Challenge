@@ -1,6 +1,11 @@
-"""Precompute per-slide PANDA tile artifacts for tile-based training."""
+"""Precompute per-slide PANDA tile artifacts for tile-based training.
+
+On Kaggle, prefer ``--format png`` for full-dataset runs because uncompressed
+``.npy`` tiles can exceed the notebook working-disk budget.
+"""
 
 import argparse
+import shutil
 import sys
 from pathlib import Path
 
@@ -23,7 +28,7 @@ except ImportError:  # pragma: no cover - joblib is in requirements, but keep th
 def parse_args():
     ap = argparse.ArgumentParser()
     ap.add_argument('--slides-dir', required=True,
-                    help='Directory containing raw PANDA .tiff/.tif slides')
+                    help='Directory containing PANDA slide images (.tiff/.tif/.png/.jpg)')
     ap.add_argument('--output-dir', required=True,
                     help='Directory to write one tile artifact per slide')
     ap.add_argument('--folds-csv', default='data/train_folds.csv',
@@ -31,7 +36,7 @@ def parse_args():
     ap.add_argument('--tile-size', type=int, default=192)
     ap.add_argument('--n-tiles', type=int, default=36)
     ap.add_argument('--level', type=int, default=1,
-                    help='Pyramid level to read from the TIFF slide')
+                    help='Pyramid level for TIFF inputs; ignored for PNG/JPEG inputs')
     ap.add_argument('--format', choices=['npy', 'png', 'both'], default='npy',
                     help='Artifact format to save')
     ap.add_argument('--limit', type=int,
@@ -81,6 +86,33 @@ def outputs_exist(output_dir, image_id, save_format):
     return bool(checks) and all(path.exists() for path in checks)
 
 
+def format_gib(num_bytes):
+    return f'{num_bytes / (1024 ** 3):.1f} GiB'
+
+
+def estimate_npy_bytes(num_slides, tile_size, n_tiles):
+    return num_slides * n_tiles * tile_size * tile_size * 3
+
+
+def check_disk_budget(output_dir, num_pending, tile_size, n_tiles, save_format):
+    if save_format not in ('npy', 'both') or num_pending == 0:
+        return
+
+    est_npy_bytes = estimate_npy_bytes(num_pending, tile_size, n_tiles)
+    free_bytes = shutil.disk_usage(output_dir).free
+    print(
+        'Estimated uncompressed NPY footprint:',
+        format_gib(est_npy_bytes),
+        f'(free: {format_gib(free_bytes)})',
+    )
+    if est_npy_bytes > free_bytes:
+        raise RuntimeError(
+            'Requested output format includes .npy tiles, but the estimated uncompressed '
+            f'footprint is {format_gib(est_npy_bytes)} and only {format_gib(free_bytes)} '
+            'is free. Use --format png on Kaggle, or reduce tile count/size.'
+        )
+
+
 def process_one(image_id, slides_dir, output_dir, tile_size, n_tiles, level, save_format):
     slide_path = resolve_slide_path(slides_dir, image_id)
     tiles = extract_tiles_from_slide(
@@ -119,6 +151,7 @@ def main():
     print(f'{len(pending_ids)} to process, {skipped} already present')
     if not pending_ids:
         return
+    check_disk_budget(output_dir, len(pending_ids), args.tile_size, args.n_tiles, args.format)
 
     worker_args = (
         args.slides_dir,

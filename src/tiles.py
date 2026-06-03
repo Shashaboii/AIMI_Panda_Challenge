@@ -1,5 +1,6 @@
 """Tile extraction helpers for PANDA whole-slide images."""
 
+import os
 from pathlib import Path
 
 import numpy as np
@@ -153,5 +154,13 @@ def save_tile_array(image_id, tiles, out_dir):
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / f'{image_id}.npy'
-    np.save(out_path, np.asarray(tiles, dtype=np.uint8))
+    tmp_path = out_dir / f'{image_id}.npy.tmp'
+    try:
+        with open(tmp_path, 'wb') as f:
+            np.save(f, np.asarray(tiles, dtype=np.uint8))
+        os.replace(tmp_path, out_path)
+    except Exception:
+        if tmp_path.exists():
+            tmp_path.unlink()
+        raise
     return str(out_path)
