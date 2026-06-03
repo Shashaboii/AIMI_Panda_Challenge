@@ -49,7 +49,11 @@ def collect_image_ids(slides_dir, folds_csv=None, limit=None):
         image_ids = df.image_id.astype(str).tolist()
     else:
         slides_dir = Path(slides_dir)
-        image_ids = [path.stem for path in sorted(slides_dir.glob('*.tif*'))]
+        patterns = ('*.tif', '*.tiff', '*.png', '*.jpg', '*.jpeg')
+        image_ids = []
+        for pattern in patterns:
+            image_ids.extend(path.stem for path in sorted(slides_dir.glob(pattern)))
+        image_ids = sorted(set(image_ids))
     if limit is not None:
         image_ids = image_ids[:limit]
     return image_ids
@@ -57,11 +61,14 @@ def collect_image_ids(slides_dir, folds_csv=None, limit=None):
 
 def resolve_slide_path(slides_dir, image_id):
     slides_dir = Path(slides_dir)
-    for suffix in ('.tiff', '.tif'):
+    for suffix in ('.tiff', '.tif', '.png', '.jpg', '.jpeg'):
         candidate = slides_dir / f'{image_id}{suffix}'
         if candidate.exists():
             return candidate
-    raise FileNotFoundError(f'Could not find {image_id}.tiff/.tif in {slides_dir}')
+    raise FileNotFoundError(
+        f'Could not find {image_id} with any supported extension '
+        f'(.tiff, .tif, .png, .jpg, .jpeg) in {slides_dir}'
+    )
 
 
 def outputs_exist(output_dir, image_id, save_format):

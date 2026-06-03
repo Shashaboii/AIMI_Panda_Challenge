@@ -53,6 +53,12 @@ def read_slide_image(slide_path, level=1):
     return _ensure_rgb_uint8(image)
 
 
+def read_raster_image(image_path):
+    """Read a standard raster image such as PNG/JPEG as RGB uint8."""
+    with Image.open(image_path) as img:
+        return _ensure_rgb_uint8(img.convert('RGB'))
+
+
 def pad_to_tile_size(image, tile_size, pad_value=WHITE_PIXEL):
     """Pad HWC image with white pixels so both spatial dims divide tile_size."""
     if tile_size <= 0:
@@ -111,8 +117,16 @@ def get_tiles(image, tile_size=192, n_tiles=36):
 
 
 def extract_tiles_from_slide(slide_path, tile_size=192, n_tiles=36, level=1):
-    """Read a slide from disk and return its top-N tiles."""
-    image = read_slide_image(slide_path, level=level)
+    """Read a slide or raster image from disk and return its top-N tiles.
+
+    TIFF inputs use ``level`` to read from the WSI pyramid. PNG/JPEG inputs are
+    treated as already-rendered RGB images and ignore ``level``.
+    """
+    suffix = Path(slide_path).suffix.lower()
+    if suffix in ('.tif', '.tiff'):
+        image = read_slide_image(slide_path, level=level)
+    else:
+        image = read_raster_image(slide_path)
     return get_tiles(image, tile_size=tile_size, n_tiles=n_tiles)
 
 
