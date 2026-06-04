@@ -120,6 +120,8 @@ class PandaDataset(Dataset):
         row = self.df.iloc[i]
         path = os.path.join(self.image_dir, f'{row.image_id}.png')
         if not os.path.exists(path):
+            path = os.path.join(self.image_dir, f'{row.image_id}.tiff')
+        if not os.path.exists(path):
             raise FileNotFoundError(f'Could not read {path}')
         img = _read_rgb_image(path)
         if self.train:
