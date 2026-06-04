@@ -1,94 +1,80 @@
 # Track B — Model architecture
 
+Last updated: 2026-06-04
+
 You own how the model processes the input and produces a prediction.
 
 ## Files you own
 
 - `src/model.py` — model definitions
-- `src/train.py` — training loop (modify with caution — Person C also depends on this)
+- `src/train.py` — training loop
 
-## Goal for the project
+## Current status
 
-Replace the baseline's "single image in, single scalar out" EfficientNet with the **concat-tile-pooling** architecture that pools features across multiple tiles per slide. This is the architectural piece that made tile-based PANDA approaches work — without it, tile-based models often underperform thumbnail-based ones.
+- `ConcatTilePoolingModel` already exists in `src/model.py`.
+- `src/train.py` already supports:
+  - `efficientnet-b0` and `efficientnet-b1`
+  - `smoothl1`, `mse`, and `ordinal` losses
+  - tile-mode training through `--tile-dir`
+- Track A already has a first tile dataset, so tile-mode is no longer blocked on artifacts existing.
+- Tile-mode training is still blocked in practice until the repo has a working `PandaTileDataset` and the expected artifact format is wired into `src/dataset.py`.
+- Logged thumbnail-only results so far:
+  - clean 5-fold `b0 + SmoothL1`: `0.7116`
+  - clean 5-fold `b0 + MSE`: `0.7030`
+  - fold-0 `b1 + SmoothL1`: `0.7125`
+  - fold-0 `b0 + ordinal`: `0.7314`
+- 5-fold `b0 + ordinal` weights already exist and should now be treated as an ensemble-ready family pending OOF logging and comparison.
 
-Expected lift on top of Person A's tiles: +0.02–0.04 val QWK.
+## Objective from here to project success
 
-## Week 1 — Implement concat-tile-pooling
+Pick one best single model family, train it across all 5 folds, and hand those weights to Track C for fair OOF ensembling and external validation.
 
-The architecture in plain English:
+In practice, that means:
 
-1. Input shape changes from `[B, 3, H, W]` to `[B, N_tiles, 3, H, W]`.
-2. Reshape to `[B*N_tiles, 3, H, W]` and run the EfficientNet backbone — get `[B*N_tiles, F]` features.
-3. Reshape back to `[B, N_tiles, F]`.
-4. Average-pool over the tile dimension to get `[B, F]`.
-5. Final linear head → `[B, 1]` regression output.
+1. finish the best remaining thumbnail ablation quickly
+2. switch to tile models as soon as Track A unblocks them
+3. avoid spending compute on low-value reruns
 
-In `src/model.py`:
+## What is left right now
 
-```python
-class ConcatTilePoolingModel(nn.Module):
-    def __init__(self, backbone_name='efficientnet-b0', pretrained=True, dropout=0.3):
-        super().__init__()
-        self.backbone = EfficientNet.from_pretrained(backbone_name)
-        in_f = self.backbone._fc.in_features
-        self.backbone._fc = nn.Identity()
-        self.head = nn.Sequential(
-            nn.Dropout(dropout),
-            nn.Linear(in_f, 1),
-        )
+1. Make sure the 5-fold `b0 + ordinal` family is evaluated through `src.oof` and logged cleanly in `results.md`.
+2. Do not spend more compute on full-5-fold `b0 + mse` reruns; that family is already weaker than the clean SmoothL1 baseline.
+3. Do not commit to full-5-fold `b1` unless a cheap fold-0 test clearly beats the best `b0` setup.
+4. As soon as the tile dataset is readable through `PandaTileDataset`, run the first tile model on fold 0 with `efficientnet-b0`.
+5. Compare tile counts on fold 0 only after the first tile model works.
+6. Pick one best tile config and train all 5 folds with it.
+7. Only after the base tile model is competitive should you consider mixup.
 
-    def forward(self, x):
-        # x: [B, N, 3, H, W]
-        B, N, C, H, W = x.shape
-        x = x.view(B * N, C, H, W)
-        feats = self.backbone(x)            # [B*N, F]
-        feats = feats.view(B, N, -1)         # [B, N, F]
-        feats = feats.mean(dim=1)            # [B, F]
-        return self.head(feats).squeeze(-1)
-```
+## Recommended run order
 
-Read [Iafoss's PANDA notebook](https://www.kaggle.com/code/iafoss/panda-concat-tile-pooling-starter-0-79-lb) for context on how the original authors did this — then close it and write your own.
+1. Now: fair OOF evaluation of the existing `b0 + ordinal` family through Track C.
+2. After that: `b0 + tiles36 + imsize192`, fold 0.
+3. Then: `b0` tile-count sweep on fold 0, such as `16`, `32`, `36`.
+4. Then: best tile config, all 5 folds.
+5. Only if compute remains: `b1` follow-up or mixup.
 
-## Week 2 — Baseline experiments
+## What not to optimize right now
 
-Compare on the same fold (use fold 0 always for quick comparisons):
+- Do not chase tiny `b0` vs `b1` differences before ordinal and tile runs are settled.
+- Do not add mixup before there is a stable tile baseline.
+- Do not compare runs across different fold splits; `data/train_folds.csv` remains fixed.
 
-- EffNet-B0 vs EffNet-B1 — bigger backbone usually helps but is slower
-- SmoothL1 vs MSE vs ordinal regression (BCE on cumulative thresholds)
-- Different tile counts (work with Person A)
+## Done when
 
-Log each result in `results.md`. Pick a "best single model" config by end of week 2.
+- The team has a clearly chosen best single model family.
+- There are 5 weights for that family with consistent naming.
+- `results.md` contains rows for every serious ablation, not just single-fold spot checks.
+- Track C can run fair OOF and final ensembling without needing changes in `src/train.py` or `src/model.py`.
 
-## Week 3 — Mixup and augmentation
+## Reference architecture
 
-Mixup is a regularization technique that combines two training examples by interpolating both inputs and labels. The PANDA winners reported a small but consistent gain (~0.005 QWK). Implement it in `src/train.py`:
+The tile model should keep this structure:
 
-```python
-def mixup(x, y, alpha=0.4):
-    lam = np.random.beta(alpha, alpha)
-    perm = torch.randperm(x.size(0))
-    x_mix = lam * x + (1 - lam) * x[perm]
-    y_mix = lam * y + (1 - lam) * y[perm]
-    return x_mix, y_mix
-```
+1. input `[B, N, 3, H, W]`
+2. reshape to `[B*N, 3, H, W]`
+3. run the EfficientNet backbone
+4. reshape back to `[B, N, F]`
+5. average over tiles
+6. apply the prediction head
 
-Apply with probability 0.5 per batch.
-
-## Week 4 — Finalize for ensemble
-
-Lock in your best config. Train all 5 folds with it. Hand 5 .pth files to Person C for ensembling.
-
-## What success looks like
-
-- A `ConcatTilePoolingModel` class in `src/model.py`
-- Mixup integrated as a flag in `src/train.py` (`--mixup` argument)
-- 5 sets of weights, one per fold, with consistent naming (`<backbone>_tiles<N>_imsize<S>_fold<F>.pth`)
-- Ablation rows in `results.md` showing impact of each architectural change
-
-## Where to start Monday
-
-1. Pull the latest from main
-2. Re-read `src/model.py`, `src/train.py`, `src/eval.py`
-3. Wait for Person A to publish their first tile Dataset (Monday or Tuesday)
-4. Implement `ConcatTilePoolingModel`, run on fold 0 with their tiles
-5. Compare val QWK against the baseline (~0.70). Target for week 1: > 0.75
+That is the minimum architectural change needed to make tile-based PANDA experiments meaningful.

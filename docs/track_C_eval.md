@@ -1,82 +1,83 @@
 # Track C — Evaluation, ensembling, and external validation
 
+Last updated: 2026-06-04
+
 You own how we measure model quality and how the final predictions are produced.
 
 ## Files you own
 
-- `src/eval.py` — shared QWK function (already exists, modify carefully)
-- `src/inference.py` — inference and ensembling helpers (you'll create)
+- `src/eval.py` — shared QWK function
+- `src/inference.py` — inference and ensembling helpers
+- `src/oof.py` — fair out-of-fold evaluation script
+- `notebooks/02b_train_all_folds.ipynb` — train-all-folds runner
+- `notebooks/02c_ensemble_oof.ipynb` — fair ensemble OOF notebook
 - `notebooks/03_external_validation.ipynb` — PBGG-1 evaluation
-- The team's "did this experiment work" answer
 
-## Why this track matters
+## Current status
 
-**Kaggle leaderboard submissions don't get scored anymore** (the competition closed in 2020 and late submissions return "after deadline" without a score). So our evaluation strategy is:
+- The shared QWK utilities are in place.
+- The repo already has a working OOF pipeline through `src.oof`.
+- Clean 5-fold thumbnail baseline is logged at `0.7116` global OOF QWK.
+- Clean 5-fold `b0 + mse` is logged at `0.7030` global OOF QWK.
+- 5-fold `b0 + ordinal` weights already exist and should be included in the next fair ensemble comparison.
+- `ensemble_predict(...)` exists, and `02c_ensemble_oof.ipynb` exists for fair fold-wise ensembling.
+- Track A already has a first tile dataset, so external validation and ensemble planning should assume tile-family weights are expected later, not that tile artifacts are missing entirely.
+- `03_external_validation.ipynb` is still missing and PBGG-1 is not yet part of the team workflow.
 
-1. **Primary**: 5-fold stratified cross-validation on the PANDA training set. Mean ± std QWK across 5 folds. This is the same methodology as Bulten et al. (Nature Medicine 2022) and the 1st-place solution.
-2. **Secondary**: external validation on the publicly available PBGG-1 dataset from Tolkach et al. 2023 (npj Precision Oncology). 50 slides graded by 10 pathologists. Lets us compare directly to published medical AI numbers.
+## Objective from here to project success
 
-This is a stronger evaluation than a single leaderboard score would have been.
+Own the team's final answer to "did this experiment actually help?" by:
 
-## Week 1 — Get cross-validation working
+1. keeping evaluation fair
+2. producing ensemble OOF numbers
+3. building the external validation pipeline
+4. turning all of that into paper-ready tables
 
-The fold-split already exists in `data/train_folds.csv`. Your job week 1:
+## What is left right now
 
-- Write `src/inference.py` with a function `predict_oof(model, df, image_dir) -> np.ndarray` that returns per-slide predictions for the validation fold
-- Set up an "experiment runner" notebook that, for any given config, trains 5 folds and reports `mean ± std` val QWK across them
-- Verify by running the baseline 5 times on 5 folds — you should see numbers around 0.68–0.72 with some variation
+1. Run `src.oof` or the equivalent notebook flow on the existing 5-fold `b0 + ordinal` family and log the result if it is not already in `results.md`.
+2. Run a fair OOF ensemble on the model families that already have all 5 folds.
+3. Create or attach one Kaggle Dataset per weight family for the ensemble notebook.
+4. Log the ensemble result in `results.md` with:
+   - per-family mean ± std
+   - ensemble mean ± std
+   - global OOF QWK
+5. Re-run the ensemble summary after any new tile-family 5-fold weights arrive.
+6. Create `notebooks/03_external_validation.ipynb`.
+7. Mirror PBGG-1 to a Kaggle Dataset the team can attach.
+8. Build the PBGG-1 loader, compute majority-vote labels, and report QWK.
+9. Add TTA only to the final selected model or ensemble, not to exploratory runs.
 
-## Week 2 — Ensembling
+## Recommended order
 
-When Person B's first multi-fold weights exist, write the ensembling logic:
+1. Use `02c_ensemble_oof.ipynb` to validate the ensemble pipeline now.
+2. Start with `b0 + SmoothL1` plus `b0 + ordinal`, since both are expected to be full 5-fold families.
+3. Add or compare `b0 + MSE` only if it improves the ensemble or helps analysis.
+4. Re-run the ensemble with stronger tile families once they exist.
+5. Only after the final family or ensemble is chosen should you spend time on TTA and external-validation polish.
 
-```python
-def ensemble_predict(models, x):
-    """Average predictions across N trained models."""
-    preds = []
-    for m in models:
-        m.eval()
-        with torch.no_grad():
-            preds.append(m(x).cpu().numpy())
-    return np.mean(preds, axis=0)
-```
+## Fairness rules that must not be broken
 
-Verify that 5-fold ensemble val QWK is higher than any single fold's val QWK. Typical lift: +0.02 QWK.
+- For validation fold `f`, only use the checkpoint trained with fold `f` held out.
+- Do not average all five fold checkpoints onto the same validation fold.
+- Do not compare experiments across different fold splits.
+- Always use `src.eval.qwk(...)` as the source of truth.
 
-## Week 3 — External validation on PBGG-1
+## What a "weight family" means
 
-Download the PBGG-1 dataset from Zenodo: https://zenodo.org/records/8102833
+For ensembling, one family means one training recipe across all 5 folds.
 
-50 OME-TIFF slides plus a CSV of 10 pathologists' ISUP gradings. To use:
+Examples:
 
-1. Add as a Kaggle Dataset for the team
-2. Write a small loader (it's only 50 slides, no fancy infrastructure needed) — likely OME-TIFF format, may need `tifffile` to read
-3. Compute majority-vote labels per slide
-4. Run your ensemble on each slide
-5. Report QWK against the majority labels
+- `b0 + SmoothL1`, folds `0..4`
+- `b0 + MSE`, folds `0..4`
+- `b0 + ordinal`, folds `0..4`
 
-Also report inter-pathologist agreement on the same slides for context — Tolkach et al. reported pathologist range 0.62–0.80, so if your model lands in that range, you're at pathologist-level performance.
+Each family should live in its own Kaggle Dataset so the ensemble notebook can attach it cleanly.
 
-## Week 4 — Test-time augmentation and final submission
+## Done when
 
-TTA is a free ~0.005 QWK lift. Predict on each test slide, its horizontal flip, its 90° rotation, etc., then average. Should add maybe 10 lines to `src/inference.py`.
-
-Then produce the final numbers for the paper:
-- Per-fold val QWK (5 numbers)
-- Mean ± std val QWK
-- External validation QWK on PBGG-1
-- Comparison to pathologist range (with citation)
-
-## What success looks like
-
-- An ablation table in `results.md` with mean ± std for every experiment the team has run
-- A working external validation pipeline that runs in <10 minutes on Kaggle
-- A clean inference notebook (`notebooks/03_external_validation.ipynb`) that any team member can re-run
-- Numbers ready for the paper
-
-## Where to start Monday
-
-1. Pull the latest from main
-2. Read `src/eval.py` — that's your single source of truth for QWK; everyone imports from there
-3. Reproduce the baseline val QWK 0.70 on fold 0 to confirm the pipeline works for you locally / in a Kaggle notebook
-4. Write a script that trains all 5 folds and prints the mean — run it once with the baseline so we have a real "5-fold mean baseline QWK" number to beat
+- `results.md` has a paper-ready ablation table for all serious experiments.
+- There is at least one fair ensemble OOF result logged.
+- `03_external_validation.ipynb` runs end to end on Kaggle.
+- The team has final PANDA CV numbers and PBGG-1 numbers ready for the paper.
