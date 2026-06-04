@@ -13,17 +13,20 @@ You own everything between the raw whole-slide images and the tensors that go in
 
 ## Current status
 
-- All logged scores so far are still from the thumbnail baseline, not from tiles.
-- The current repo only has `PandaDataset` in `src/dataset.py`; there is no working `PandaTileDataset` yet.
-- A first Track A tile dataset already exists on Kaggle, but the repo still needs the loader-side integration to use it cleanly from `src/dataset.py`.
-- This track is no longer blocked on tile artifacts existing; it is now blocked on turning those artifacts into a stable training input path for Tracks B and C.
+- Tile extraction code is in `src/tiles.py`.
+- Bulk preprocessing is in `scripts/preprocess_tiles.py`.
+- `PandaTileDataset` is implemented in `src/dataset.py` and can load `.npy`, `.npz`, or stacked `.png` tile artifacts as `[N, 3, H, W]`.
+- `src.train` now supports `--tile-dir` and respects `--n-tiles` at loader time, so one 36-tile artifact set can be reused for `16/32/36` tile-count ablations.
+- `notebooks/03_dataset_tiles.ipynb` is the Track A Kaggle notebook for preprocessing, fold-0 training, ablations, and Kaggle Dataset packaging.
+- A first Kaggle tile dataset already exists for the team.
+- All logged scores in `results.md` are still from the thumbnail baseline until the first tile fold-0 run is recorded.
 
 ## Objective from here to project success
 
 Deliver one reliable tile pipeline end to end:
 
 1. extract tiles from the WSIs
-2. publish one team-usable Kaggle Dataset of tile artifacts
+2. maintain one team-usable Kaggle Dataset of tile artifacts
 3. expose those tiles through `PandaTileDataset`
 4. unblock Track B to train concat-tile-pooling models
 
@@ -31,30 +34,60 @@ The first target is not "perfect tile engineering." The first target is one work
 
 ## What is left right now
 
-1. Implement `src/tiles.py` with:
-   - `get_tiles(image, tile_size=192, n_tiles=36) -> np.ndarray`
-   - `save_tile_stack(image_id, tiles, out_dir)`
-2. If the existing tile dataset is the intended final artifact format, commit the extraction/preprocessing code that produced it so the dataset is reproducible from the repo.
-3. Sanity-check the published tile artifacts visually on 5 slides and confirm shape, ordering, and naming conventions.
-4. Extend `src/dataset.py` with `PandaTileDataset` returning `[N, 3, H, W]` per slide.
-5. Apply augmentation per tile, not once to the whole stack.
-6. Hand the final dataset slug, artifact format, and naming convention to Tracks B and C.
-7. Only if needed, regenerate and republish the tile dataset after loader-format fixes.
+1. Finish a clean GPU EfficientNet fold-0 training run from `notebooks/03_dataset_tiles.ipynb`.
+2. Record the first comparable tile-model fold-0 QWK in `results.md`.
+3. Run the planned tile-count ablation at fixed `tile_size=192`: `16`, `32`, and `36`.
+4. Confirm the current Kaggle tile dataset slug, artifact format, and directory layout with Tracks B and C.
+5. If the current tile dataset is not the final artifact format, republish a cleaned final version.
+6. If the team gets access to raw TIFF WSIs, rerun the same pipeline with raw tiles and compare against the PNG-fallback result.
 
 ## Recommended order
 
-1. Start with one default configuration: `n_tiles=36`, `tile_size=192`.
-2. Get the first tile dataset and loader working before trying multiple tile counts.
-3. Once Track B has a first fold-0 tile model, compare `16`, `32`, and `36` tiles if compute allows.
-4. Treat stain normalization as a stretch goal, not a prerequisite.
+1. Default config:
+   - `n_tiles=36`
+   - `tile_size=192`
+   - `format=png` on Kaggle to stay within disk limits
+2. Use `notebooks/03_dataset_tiles.ipynb` to:
+   - preprocess one smoke-test subset
+   - confirm the existing full dataset
+   - train fold 0 on GPU
+   - prepare `dataset-metadata.json` if the dataset needs republishing
+   - run `16/32/36` ablations
+3. Treat the current tile dataset as the working handoff artifact for Track B.
+4. Treat the resized PNG input path as an unblocker mode.
+5. Treat the raw TIFF path as the preferred final mode for the best score.
 
 ## Done when
 
-- There is a Kaggle Dataset containing tile artifacts for all usable slides.
+- There is a Kaggle Dataset containing tile artifacts for all usable slides, and the rest of the team knows how to attach it.
 - The code that produced that dataset is present in the repo and reproducible.
 - `PandaTileDataset` is merged and Track B can train with `--tile-dir` without touching data code.
 - At least one tile configuration has a logged QWK in `results.md`.
 - The team has a short paper-ready description of the tile extraction algorithm.
+
+## Locked conventions
+
+- Artifact directory naming:
+  - `/kaggle/working/panda_tiles_<N>x<S>_<format>`
+  - example: `/kaggle/working/panda_tiles_36x192_png`
+- Training feature tag:
+  - `tiles<N>_imsize<S>`
+  - example: `tiles36_imsize192`
+- Weight filename:
+  - `<backbone>_<feature_tag>_<loss>_fold<F>.pth`
+  - example: `efficientnetb0_tiles36_imsize192_ordinal_fold0.pth`
+- Kaggle dataset slug:
+  - `panda-tiles<N>x<S>-<format>`
+  - example: `panda-tiles36x192-png`
+
+## Kaggle workflow
+
+1. Run notebook cell 1 to set the shared config.
+2. Run cell 2 for a 5-slide smoke test.
+3. Run cell 3 to verify or regenerate the full preprocessing output.
+4. Run cell 4 for the first real fold-0 tile model.
+5. Run cell 5 to generate `dataset-metadata.json` if the dataset needs a new Kaggle version.
+6. Run cell 6 for the `16/32/36` tile-count ablation.
 
 ## Reference extraction recipe
 

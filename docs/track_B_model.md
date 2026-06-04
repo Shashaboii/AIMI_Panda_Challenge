@@ -16,14 +16,15 @@ You own how the model processes the input and produces a prediction.
   - `efficientnet-b0` and `efficientnet-b1`
   - `smoothl1`, `mse`, and `ordinal` losses
   - tile-mode training through `--tile-dir`
-- Track A already has a first tile dataset, so tile-mode is no longer blocked on artifacts existing.
-- Tile-mode training is still blocked in practice until the repo has a working `PandaTileDataset` and the expected artifact format is wired into `src/dataset.py`.
+- Track A already has a first tile dataset.
+- `PandaTileDataset` already exists in `src/dataset.py`, so tile-mode is no longer blocked by missing repo plumbing.
 - Logged thumbnail-only results so far:
   - clean 5-fold `b0 + SmoothL1`: `0.7116`
   - clean 5-fold `b0 + MSE`: `0.7030`
   - fold-0 `b1 + SmoothL1`: `0.7125`
   - fold-0 `b0 + ordinal`: `0.7314`
-- 5-fold `b0 + ordinal` weights already exist and should now be treated as an ensemble-ready family pending OOF logging and comparison.
+- clean 5-fold `b0 + ordinal`: `0.7244`
+- The remaining gap is not model plumbing; it is getting the first real GPU tile run logged and then deciding whether tiles beat the ordinal thumbnail family strongly enough to become the new primary track.
 
 ## Objective from here to project success
 
@@ -37,31 +38,31 @@ In practice, that means:
 
 ## What is left right now
 
-1. Make sure the 5-fold `b0 + ordinal` family is evaluated through `src.oof` and logged cleanly in `results.md`.
+1. Treat `b0 + ordinal` as the current best thumbnail family.
 2. Do not spend more compute on full-5-fold `b0 + mse` reruns; that family is already weaker than the clean SmoothL1 baseline.
 3. Do not commit to full-5-fold `b1` unless a cheap fold-0 test clearly beats the best `b0` setup.
-4. As soon as the tile dataset is readable through `PandaTileDataset`, run the first tile model on fold 0 with `efficientnet-b0`.
+4. Run the first real tile model on fold 0 with `efficientnet-b0`.
 5. Compare tile counts on fold 0 only after the first tile model works.
-6. Pick one best tile config and train all 5 folds with it.
+6. If tiles beat the thumbnail ordinal family cleanly, pick one best tile config and train all 5 folds with it.
 7. Only after the base tile model is competitive should you consider mixup.
 
 ## Recommended run order
 
-1. Now: fair OOF evaluation of the existing `b0 + ordinal` family through Track C.
-2. After that: `b0 + tiles36 + imsize192`, fold 0.
-3. Then: `b0` tile-count sweep on fold 0, such as `16`, `32`, `36`.
+1. Now: `b0 + tiles36 + imsize192`, fold 0 on the existing tile dataset.
+2. Then: `b0` tile-count sweep on fold 0, such as `16`, `32`, `36`.
+3. Compare those results directly against the current thumbnail reference, `b0 + ordinal` at `0.7244`.
 4. Then: best tile config, all 5 folds.
 5. Only if compute remains: `b1` follow-up or mixup.
 
 ## What not to optimize right now
 
-- Do not chase tiny `b0` vs `b1` differences before ordinal and tile runs are settled.
+- Do not chase tiny `b0` vs `b1` differences before the first real tile runs are settled.
 - Do not add mixup before there is a stable tile baseline.
 - Do not compare runs across different fold splits; `data/train_folds.csv` remains fixed.
 
 ## Done when
 
-- The team has a clearly chosen best single model family.
+- The team has a clearly chosen best single model family, with an explicit comparison between thumbnail ordinal and the best tile run.
 - There are 5 weights for that family with consistent naming.
 - `results.md` contains rows for every serious ablation, not just single-fold spot checks.
 - Track C can run fair OOF and final ensembling without needing changes in `src/train.py` or `src/model.py`.
