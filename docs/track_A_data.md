@@ -1,71 +1,72 @@
 # Track A — Data pipeline
 
+Last updated: 2026-06-04
+
 You own everything between the raw whole-slide images and the tensors that go into the model.
 
 ## Files you own
 
 - `src/dataset.py` — PyTorch Dataset
-- `src/tiles.py` — tile extraction (you'll create this)
+- `src/tiles.py` — tile extraction
+- `scripts/preprocess_tiles.py` — bulk preprocessing script
 - `data/train_folds.csv` — 5-fold split CSV (generated once, then frozen)
 
-## Goal for the project
+## Current status
 
-Replace the baseline's 512×512 thumbnail input with a tile-based input that gives the model access to high-resolution tissue regions. This is the single biggest score-mover in PANDA — expected lift from val QWK ~0.70 to ~0.78–0.82.
+- All logged scores so far are still from the thumbnail baseline, not from tiles.
+- The current repo only has `PandaDataset` in `src/dataset.py`; there is no working `PandaTileDataset` yet.
+- A first Track A tile dataset already exists on Kaggle, but the repo still needs the loader-side integration to use it cleanly from `src/dataset.py`.
+- This track is no longer blocked on tile artifacts existing; it is now blocked on turning those artifacts into a stable training input path for Tracks B and C.
 
-## Week 1 — Tile extraction
+## Objective from here to project success
 
-Look at `s07_simple_tile.py` in the [winners' repo](https://github.com/kentaroy47/Kaggle-PANDA-1st-place-solution). Read it, take notes on the approach, **close the tab**, then write your own version. The algorithm in plain English:
+Deliver one reliable tile pipeline end to end:
 
-1. Read the WSI at level 1 of its pyramid (use `tifffile`, not `skimage.io.MultiImage` — the latter is broken on the current Kaggle base image).
-2. Pad the image so its dimensions are multiples of your tile size (e.g. 192 or 256).
-3. Reshape into a grid of tiles.
-4. Score each tile by "tissue content" — sum of (255 − pixel value) across the tile. Higher score = more tissue (less white space).
-5. Keep the top N tiles by score (N is typically 16, 32, or 36).
-6. Either save them stacked vertically as one big PNG (simple, works with the baseline model), or save them as a numpy array of shape `[N, tile_size, tile_size, 3]` (better for Person B's concat-tile-pooling model).
+1. extract tiles from the WSIs
+2. publish one team-usable Kaggle Dataset of tile artifacts
+3. expose those tiles through `PandaTileDataset`
+4. unblock Track B to train concat-tile-pooling models
 
-Build it as a standalone module:
+The first target is not "perfect tile engineering." The first target is one working tile configuration that lets Track B beat the clean thumbnail baseline and move toward `0.78+` QWK.
 
-```python
-# src/tiles.py
-def get_tiles(image: np.ndarray, tile_size=192, n_tiles=36) -> np.ndarray:
-    """Returns [n_tiles, tile_size, tile_size, 3] uint8 array."""
-    ...
+## What is left right now
 
-def save_tile_stack(image_id, tiles, out_dir):
-    """Save tiles as one PNG (concatenated grid) for easy loading."""
-    ...
-```
+1. Implement `src/tiles.py` with:
+   - `get_tiles(image, tile_size=192, n_tiles=36) -> np.ndarray`
+   - `save_tile_stack(image_id, tiles, out_dir)`
+2. If the existing tile dataset is the intended final artifact format, commit the extraction/preprocessing code that produced it so the dataset is reproducible from the repo.
+3. Sanity-check the published tile artifacts visually on 5 slides and confirm shape, ordering, and naming conventions.
+4. Extend `src/dataset.py` with `PandaTileDataset` returning `[N, 3, H, W]` per slide.
+5. Apply augmentation per tile, not once to the whole stack.
+6. Hand the final dataset slug, artifact format, and naming convention to Tracks B and C.
+7. Only if needed, regenerate and republish the tile dataset after loader-format fixes.
 
-Then a script `scripts/preprocess_tiles.py` that iterates over all training slides and produces a Kaggle Dataset.
+## Recommended order
 
-## Week 2 — Tile-aware Dataset
+1. Start with one default configuration: `n_tiles=36`, `tile_size=192`.
+2. Get the first tile dataset and loader working before trying multiple tile counts.
+3. Once Track B has a first fold-0 tile model, compare `16`, `32`, and `36` tiles if compute allows.
+4. Treat stain normalization as a stretch goal, not a prerequisite.
 
-Once tiles exist, extend `src/dataset.py`. Add a `PandaTileDataset` class that returns `[N, 3, H, W]` per slide (Person B will average-pool over the N dimension in their model). Augmentation should be applied per-tile (random flip/rotate each).
+## Done when
 
-## Week 3 — Stain normalization (optional)
+- There is a Kaggle Dataset containing tile artifacts for all usable slides.
+- The code that produced that dataset is present in the repo and reproducible.
+- `PandaTileDataset` is merged and Track B can train with `--tile-dir` without touching data code.
+- At least one tile configuration has a logged QWK in `results.md`.
+- The team has a short paper-ready description of the tile extraction algorithm.
 
-Radboud and Karolinska slides look slightly different (different scanners, different H&E protocols). Try one of:
-- Reinhard normalization (`staintools` library, simple, fast)
-- Macenko normalization (also in `staintools`)
+## Reference extraction recipe
 
-Check whether it helps val QWK. Don't be surprised if it doesn't — sometimes augmentation alone is enough.
+Use the winners' repo for inspiration, then re-implement the idea cleanly. The intended algorithm is:
 
-## Week 4 — Lock down the final tile set
+1. Read the WSI at level 1 of its pyramid with `tifffile`.
+2. Pad the image so both dimensions are multiples of `tile_size`.
+3. Reshape into a tile grid.
+4. Score each tile by tissue content: sum of `(255 - pixel_value)` over the tile.
+5. Keep the top `N` tiles by score.
+6. Save either:
+   - one grid/stack PNG per slide, or
+   - one `[N, tile_size, tile_size, 3]` array per slide
 
-Pick whichever config gave the best val QWK in your ablation. Hand off to Person C for the final ensemble.
-
-## What success looks like
-
-- A Kaggle Dataset called something like `panda-tiles-36x192` containing tile stacks for every slide.
-- A `src/dataset.py` with a working `PandaTileDataset`.
-- `results.md` rows showing each configuration's val QWK.
-- A short paragraph in the paper describing the tile extraction algorithm.
-
-## Where to start Monday
-
-1. Pull the latest from main
-2. Read the existing `src/dataset.py` and `src/eval.py` so you understand the existing API
-3. Set up a Kaggle notebook that imports your tile code and tests it on 5 slides
-4. Visualize the extracted tiles — sanity check they actually contain tissue and not just background
-5. Once happy, run the preprocessing on all ~10k slides (about 45 min)
-6. Publish as Kaggle Dataset, note its slug in `results.md`
+The array form is the better long-term fit for concat-tile-pooling.

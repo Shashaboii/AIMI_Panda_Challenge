@@ -12,6 +12,7 @@ import argparse
 import os
 import random
 import time
+from contextlib import nullcontext
 from pathlib import Path
 
 import numpy as np
@@ -134,6 +135,26 @@ def outputs_to_preds(out, args):
     return out.cpu().numpy()
 
 
+def use_amp(args, device):
+    return args.amp and device.type == 'cuda'
+
+
+def pin_memory_enabled(args, device):
+    if args.pin_memory is not None:
+        return args.pin_memory
+    if device.type != 'cuda':
+        return False
+    if use_tiles(args):
+        return False
+    return True
+
+
+def autocast_context(args, device):
+    if use_amp(args, device):
+        return torch.cuda.amp.autocast()
+    return nullcontext()
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--fold', type=int, required=True,
@@ -147,6 +168,10 @@ def main():
     ap.add_argument('--epochs', type=int, default=6)
     ap.add_argument('--batch-size', type=int, default=16)
     ap.add_argument('--num-workers', type=int, default=2)
+    ap.add_argument('--amp', action='store_true',
+                    help='Enable mixed-precision training on CUDA')
+    ap.add_argument('--pin-memory', action=argparse.BooleanOptionalAction, default=None,
+                    help='Override DataLoader pin_memory. Defaults to off for tiles, on for baseline CUDA.')
     ap.add_argument('--lr', type=float, default=3e-4)
     ap.add_argument('--backbone', default='efficientnet-b0')
     ap.add_argument('--dropout', type=float, default=0.3)
@@ -172,6 +197,10 @@ def main():
         f'backbone={args.backbone}',
         f'loss={args.loss}',
         f'dropout={args.dropout}',
+        f'batch_size={args.batch_size}',
+        f'num_workers={args.num_workers}',
+        f'amp={use_amp(args, device)}',
+        f'pin_memory={pin_memory_enabled(args, device)}',
         f'feature_tag={auto_feature_tag(args)}',
     )
 
@@ -190,15 +219,17 @@ def main():
     print(f'fold {args.fold}: train={len(train_df)}  val={len(val_df)}')
 
     train_ds, val_ds = make_datasets(train_df, val_df, args)
+    pin_memory = pin_memory_enabled(args, device)
     train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True,
-                              num_workers=args.num_workers, pin_memory=True)
+                              num_workers=args.num_workers, pin_memory=pin_memory)
     val_loader = DataLoader(val_ds, batch_size=args.batch_size, shuffle=False,
-                            num_workers=args.num_workers, pin_memory=True)
+                            num_workers=args.num_workers, pin_memory=pin_memory)
 
     model = make_model(args).to(device)
     optimizer = Adam(model.parameters(), lr=args.lr)
     scheduler = CosineAnnealingLR(optimizer, T_max=args.epochs * len(train_loader))
     loss_fn = make_loss(args)
+    scaler = torch.cuda.amp.GradScaler(enabled=use_amp(args, device))
 
     os.makedirs(args.output_dir, exist_ok=True)
     weight_path = os.path.join(args.output_dir, make_weight_path(args))
@@ -213,11 +244,13 @@ def main():
             xb = xb.to(device, non_blocking=True)
             yb = yb.to(device, non_blocking=True)
             targets = make_targets(yb, args)
-            optimizer.zero_grad()
-            out = model(xb)
-            loss = loss_fn(out, targets)
-            loss.backward()
-            optimizer.step()
+            optimizer.zero_grad(set_to_none=True)
+            with autocast_context(args, device):
+                out = model(xb)
+                loss = loss_fn(out, targets)
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
             scheduler.step()
             train_loss += loss.item() * xb.size(0)
             n += xb.size(0)
@@ -228,7 +261,9 @@ def main():
         with torch.no_grad():
             for xb, yb in val_loader:
                 xb = xb.to(device, non_blocking=True)
-                preds.append(outputs_to_preds(model(xb), args))
+                with autocast_context(args, device):
+                    out = model(xb)
+                preds.append(outputs_to_preds(out, args))
                 targs.append(yb.numpy())
         preds = np.concatenate(preds)
         targs = np.concatenate(targs).astype(int)
