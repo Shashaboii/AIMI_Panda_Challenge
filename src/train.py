@@ -64,12 +64,15 @@ def make_datasets(train_df, val_df, args):
     if use_tiles(args):
         if PandaTileDataset is None:
             raise RuntimeError('Tile training requires PandaTileDataset in src.dataset')
-        dataset_cls = PandaTileDataset
+        train_kwargs = {'n_tiles': args.n_tiles}
+        val_kwargs = {'n_tiles': args.n_tiles}
     else:
         dataset_cls = PandaDataset
+        train_kwargs = {}
+        val_kwargs = {}
     return (
-        dataset_cls(train_df, data_dir, train=True),
-        dataset_cls(val_df, data_dir, train=False),
+        dataset_cls(train_df, data_dir, train=True, **train_kwargs),
+        dataset_cls(val_df, data_dir, train=False, **val_kwargs),
     )
 
 

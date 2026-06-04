@@ -136,10 +136,11 @@ class PandaTileDataset(Dataset):
       - ``<image_id>.npy`` or ``.npz`` storing ``[N, H, W, 3]`` or ``[N, 3, H, W]``
       - ``<image_id>.png`` storing a vertical stack of tiles
     """
-    def __init__(self, df, image_dir, train=True):
+    def __init__(self, df, image_dir, train=True, n_tiles=None):
         self.df = df.reset_index(drop=True)
         self.image_dir = image_dir
         self.train = train
+        self.n_tiles = n_tiles
         self.artifact_paths = self._index_artifacts()
 
     def __len__(self):
@@ -210,6 +211,16 @@ class PandaTileDataset(Dataset):
     def __getitem__(self, i):
         row = self.df.iloc[i]
         tiles = self._load_tiles(row.image_id)
+        if self.n_tiles is not None:
+            if tiles.shape[0] >= self.n_tiles:
+                tiles = tiles[:self.n_tiles]
+            else:
+                pad = np.full(
+                    (self.n_tiles - tiles.shape[0], tiles.shape[1], tiles.shape[2], tiles.shape[3]),
+                    255,
+                    dtype=np.uint8,
+                )
+                tiles = np.concatenate([tiles, pad], axis=0)
         if self.train:
             tiles = np.stack([_augment_hwc_image(tile) for tile in tiles], axis=0)
         tiles = tiles.astype(np.float32) / 255.0
