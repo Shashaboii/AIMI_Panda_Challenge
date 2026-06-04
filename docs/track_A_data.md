@@ -18,6 +18,7 @@ You own everything between the raw whole-slide images and the tensors that go in
 - `PandaTileDataset` is implemented in `src/dataset.py` and can load `.npy`, `.npz`, or stacked `.png` tile artifacts as `[N, 3, H, W]`.
 - `src.train` now supports `--tile-dir` and respects `--n-tiles` at loader time, so one 36-tile artifact set can be reused for `16/32/36` tile-count ablations.
 - `notebooks/03_dataset_tiles.ipynb` is the Track A Kaggle notebook for preprocessing, fold-0 training, ablations, and Kaggle Dataset packaging.
+- A first Kaggle tile dataset already exists for the team.
 - All logged scores in `results.md` are still from the thumbnail baseline until the first tile fold-0 run is recorded.
 
 ## Objective from here to project success
@@ -25,7 +26,7 @@ You own everything between the raw whole-slide images and the tensors that go in
 Deliver one reliable tile pipeline end to end:
 
 1. extract tiles from the WSIs
-2. publish one team-usable Kaggle Dataset of tile artifacts
+2. maintain one team-usable Kaggle Dataset of tile artifacts
 3. expose those tiles through `PandaTileDataset`
 4. unblock Track B to train concat-tile-pooling models
 
@@ -33,11 +34,12 @@ The first target is not "perfect tile engineering." The first target is one work
 
 ## What is left right now
 
-1. Finish a clean fold-0 training run from `notebooks/03_dataset_tiles.ipynb`.
-2. Record the first tile-model fold-0 QWK in `results.md`.
+1. Finish a clean GPU EfficientNet fold-0 training run from `notebooks/03_dataset_tiles.ipynb`.
+2. Record the first comparable tile-model fold-0 QWK in `results.md`.
 3. Run the planned tile-count ablation at fixed `tile_size=192`: `16`, `32`, and `36`.
-4. Publish the chosen artifact directory as a Kaggle Dataset and hand the slug to Tracks B and C.
-5. If the team gets access to raw TIFF WSIs, rerun the same pipeline with raw tiles and compare against the PNG-fallback result.
+4. Confirm the current Kaggle tile dataset slug, artifact format, and directory layout with Tracks B and C.
+5. If the current tile dataset is not the final artifact format, republish a cleaned final version.
+6. If the team gets access to raw TIFF WSIs, rerun the same pipeline with raw tiles and compare against the PNG-fallback result.
 
 ## Recommended order
 
@@ -47,16 +49,17 @@ The first target is not "perfect tile engineering." The first target is one work
    - `format=png` on Kaggle to stay within disk limits
 2. Use `notebooks/03_dataset_tiles.ipynb` to:
    - preprocess one smoke-test subset
-   - preprocess the full dataset
-   - train fold 0
-   - prepare `dataset-metadata.json`
+   - confirm the existing full dataset
+   - train fold 0 on GPU
+   - prepare `dataset-metadata.json` if the dataset needs republishing
    - run `16/32/36` ablations
-3. Treat the resized PNG input path as an unblocker mode.
-4. Treat the raw TIFF path as the preferred final mode for the best score.
+3. Treat the current tile dataset as the working handoff artifact for Track B.
+4. Treat the resized PNG input path as an unblocker mode.
+5. Treat the raw TIFF path as the preferred final mode for the best score.
 
 ## Done when
 
-- There is a Kaggle Dataset containing tile artifacts for all usable slides.
+- There is a Kaggle Dataset containing tile artifacts for all usable slides, and the rest of the team knows how to attach it.
 - The code that produced that dataset is present in the repo and reproducible.
 - `PandaTileDataset` is merged and Track B can train with `--tile-dir` without touching data code.
 - At least one tile configuration has a logged QWK in `results.md`.
@@ -81,9 +84,9 @@ The first target is not "perfect tile engineering." The first target is one work
 
 1. Run notebook cell 1 to set the shared config.
 2. Run cell 2 for a 5-slide smoke test.
-3. Run cell 3 for full preprocessing.
-4. Run cell 4 for the first fold-0 tile model.
-5. Run cell 5 to generate `dataset-metadata.json`.
+3. Run cell 3 to verify or regenerate the full preprocessing output.
+4. Run cell 4 for the first real fold-0 tile model.
+5. Run cell 5 to generate `dataset-metadata.json` if the dataset needs a new Kaggle version.
 6. Run cell 6 for the `16/32/36` tile-count ablation.
 
 ## Reference extraction recipe
