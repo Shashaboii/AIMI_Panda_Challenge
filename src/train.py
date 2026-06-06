@@ -34,12 +34,17 @@ except ImportError:
     PandaTileDataset = None
 
 
-def seed_everything(seed=42):
+def seed_everything(seed=42, deterministic=False):
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
-    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.deterministic = deterministic
+    torch.backends.cudnn.benchmark = not deterministic
+    if hasattr(torch.backends, 'cuda') and hasattr(torch.backends.cuda, 'matmul'):
+        torch.backends.cuda.matmul.allow_tf32 = True
+    if hasattr(torch.backends, 'cudnn'):
+        torch.backends.cudnn.allow_tf32 = True
 
 
 def get_data_dir(args):
@@ -50,12 +55,33 @@ def use_tiles(args):
     return args.tile_dir is not None
 
 
-def filter_existing_rows(df, data_dir):
-    available_ids = {
-        Path(name).stem
-        for name in os.listdir(data_dir)
-        if os.path.isfile(os.path.join(data_dir, name))
-    }
+def get_available_ids(data_dir, args):
+    allowed_suffixes = None if use_tiles(args) else {'.png'}
+    available_ids = set()
+    seen_suffixes = set()
+
+    for name in os.listdir(data_dir):
+        path = os.path.join(data_dir, name)
+        if not os.path.isfile(path):
+            continue
+        suffix = Path(name).suffix.lower()
+        if suffix:
+            seen_suffixes.add(suffix)
+        if allowed_suffixes is not None and suffix not in allowed_suffixes:
+            continue
+        available_ids.add(Path(name).stem)
+
+    return available_ids, seen_suffixes
+
+
+def filter_existing_rows(df, data_dir, args):
+    available_ids, seen_suffixes = get_available_ids(data_dir, args)
+    if not use_tiles(args) and not available_ids:
+        suffix_list = ', '.join(sorted(seen_suffixes)) or '(no files found)'
+        raise RuntimeError(
+            f'No .png thumbnails found in {data_dir}. '
+            f'Baseline training expects pre-resized PNGs, but saw: {suffix_list}'
+        )
     return df[df.image_id.astype(str).isin(available_ids)].reset_index(drop=True)
 
 
@@ -64,6 +90,7 @@ def make_datasets(train_df, val_df, args):
     if use_tiles(args):
         if PandaTileDataset is None:
             raise RuntimeError('Tile training requires PandaTileDataset in src.dataset')
+        dataset_cls = PandaTileDataset
         train_kwargs = {'n_tiles': args.n_tiles}
         val_kwargs = {'n_tiles': args.n_tiles}
     else:
@@ -188,9 +215,11 @@ def main():
     ap.add_argument('--output-dir', default='outputs',
                     help='Where to save weights')
     ap.add_argument('--seed', type=int, default=42)
+    ap.add_argument('--deterministic', action='store_true',
+                    help='Enable deterministic cuDNN behavior at the cost of throughput')
     args = ap.parse_args()
 
-    seed_everything(args.seed)
+    seed_everything(args.seed, deterministic=args.deterministic)
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f'Device: {device}')
     data_dir = get_data_dir(args)
@@ -204,11 +233,12 @@ def main():
         f'num_workers={args.num_workers}',
         f'amp={use_amp(args, device)}',
         f'pin_memory={pin_memory_enabled(args, device)}',
+        f'deterministic={args.deterministic}',
         f'feature_tag={auto_feature_tag(args)}',
     )
 
     df = pd.read_csv(args.folds_csv)
-    df = filter_existing_rows(df, data_dir)
+    df = filter_existing_rows(df, data_dir, args)
     if len(df) == 0:
         raise RuntimeError(f'No usable slides found in {data_dir}')
     print(f'{len(df)} slides usable')
@@ -223,10 +253,15 @@ def main():
 
     train_ds, val_ds = make_datasets(train_df, val_df, args)
     pin_memory = pin_memory_enabled(args, device)
+    loader_kwargs = {
+        'num_workers': args.num_workers,
+        'pin_memory': pin_memory,
+        'persistent_workers': args.num_workers > 0,
+    }
     train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True,
-                              num_workers=args.num_workers, pin_memory=pin_memory)
+                              **loader_kwargs)
     val_loader = DataLoader(val_ds, batch_size=args.batch_size, shuffle=False,
-                            num_workers=args.num_workers, pin_memory=pin_memory)
+                            **loader_kwargs)
 
     model = make_model(args).to(device)
     optimizer = Adam(model.parameters(), lr=args.lr)

@@ -1,0 +1,260 @@
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{array}
+\usepackage{enumitem}
+\usepackage{hyperref}
+
+\hypersetup{
+    colorlinks=true,
+    linkcolor=black,
+    urlcolor=blue,
+    pdftitle={PANDA Project Overview},
+    pdfauthor={AIMI 2526 Team}
+}
+
+\title{PANDA Project Overview\\
+\large Proposal, Objectives, Code Overview, and Success Criteria}
+\author{AIMI 2526 --- Radboud University}
+\date{June 4, 2026}
+
+\begin{document}
+\maketitle
+
+\section{Project Summary}
+
+This project is a reproducible re-implementation of the PANDA (Prostate cANcer graDe Assessment) challenge pipeline for automated grading of prostate biopsy whole-slide images. The task is to predict the ISUP grade group from 0 to 5 directly from H\&E-stained pathology slides. The project is being carried out as the final project for the AI in Medical Imaging course at Radboud University.
+
+The practical goal is not to reproduce the full complexity of the original winning Kaggle solution, but to build a clean, scientifically defensible system that captures the highest-impact ideas:
+
+\begin{enumerate}[leftmargin=*]
+    \item tile-based input instead of a single low-resolution thumbnail,
+    \item a concat-tile-pooling model that aggregates features across tiles,
+    \item fixed 5-fold cross-validation with out-of-fold (OOF) evaluation and ensembling.
+\end{enumerate}
+
+The public Kaggle leaderboard is no longer available for PANDA because the competition closed in 2020. For that reason, the project uses 5-fold cross-validation on the PANDA training set as its primary evaluation and external validation on the PBGG-1 dataset as its secondary evaluation.
+
+\section{Problem Statement}
+
+The core medical AI problem is the automated grading of prostate cancer severity from digitized biopsy slides. Each slide must be assigned an ISUP grade in $\{0,1,2,3,4,5\}$, where larger values correspond to more aggressive disease. The challenge is difficult because whole-slide images are extremely large, diagnostically relevant regions occupy only a fraction of the tissue, and the grade labels are ordinal rather than purely categorical.
+
+The official PANDA metric is quadratic weighted Cohen's kappa (QWK), which rewards near-misses more than large-grade errors. This is appropriate for the clinical problem because predicting grade 3 instead of grade 4 is less severe than predicting grade 0 instead of grade 5.
+
+\section{Project Proposal}
+
+The proposal is to move from a simple baseline toward a more realistic whole-slide grading pipeline in staged steps.
+
+\subsection{Baseline}
+
+The starting point is a thumbnail-based model that takes a single resized $512 \times 512$ RGB image per slide and predicts ISUP grade with an EfficientNet backbone. This baseline is simple, cheap to run on Kaggle, and useful for validating the training and evaluation pipeline.
+
+\subsection{Planned Improvement Path}
+
+The intended improvement path is:
+
+\begin{enumerate}[leftmargin=*]
+    \item extract tissue-rich tiles from each whole-slide image,
+    \item train a tile-aware model that pools tile features at the slide level,
+    \item train the best model family across all 5 folds,
+    \item ensemble full 5-fold model families fairly at OOF time,
+    \item evaluate the final system on PBGG-1 for external validation.
+\end{enumerate}
+
+This design keeps the project manageable while still targeting the most important technical ideas from the PANDA literature and the winning competition solutions.
+
+\section{Objectives}
+
+\subsection{Primary Objective}
+
+Build a reproducible pipeline that predicts ISUP grade from prostate biopsy whole-slide images and demonstrates strong performance under fair 5-fold validation.
+
+\subsection{Secondary Objectives}
+
+\begin{enumerate}[leftmargin=*]
+    \item Compare multiple loss functions for thumbnail-based grading.
+    \item Build and validate a tile extraction pipeline that can be reused across experiments.
+    \item Train and evaluate a concat-tile-pooling model.
+    \item Measure the benefit of fair OOF ensembling.
+    \item Evaluate the final selected model family on PBGG-1.
+    \item Produce a repo and notebook workflow that any teammate can rerun on Kaggle.
+\end{enumerate}
+
+\section{Success Criteria}
+
+The project uses both performance and engineering success criteria.
+
+\subsection{Performance Success}
+
+\begin{itemize}[leftmargin=*]
+    \item PANDA target: 5-fold mean QWK $\geq 0.83$.
+    \item External validation target: PBGG-1 QWK $\geq 0.65$.
+    \item Intermediate milestone: first tile-based fold-0 run should beat the clean thumbnail baseline and move toward $0.78+$ QWK.
+\end{itemize}
+
+\subsection{Engineering Success}
+
+\begin{itemize}[leftmargin=*]
+    \item The codebase supports baseline, tile-based, OOF, and ensemble evaluation from shared modules in \texttt{src/}.
+    \item The tile dataset exists as a Kaggle-attachable artifact and is readable through \texttt{PandaTileDataset}.
+    \item Each serious experiment is logged in \texttt{results.md}.
+    \item The team can reproduce training and evaluation through committed notebooks and scripts.
+\end{itemize}
+
+\subsection{Scientific Success}
+
+\begin{itemize}[leftmargin=*]
+    \item Validation is fair and uses a fixed fold split.
+    \item QWK is computed consistently from one shared implementation.
+    \item Final reporting includes per-fold results, mean $\pm$ standard deviation, global OOF QWK, and external validation.
+\end{itemize}
+
+\section{Codebase Overview}
+
+The repository is structured around reusable modules in \texttt{src/}, thin Kaggle notebooks, and a running experiment log.
+
+\begin{table}[h]
+\centering
+\begin{tabularx}{\textwidth}{>{\ttfamily}l X}
+\toprule
+Path & Purpose \\
+\midrule
+src/eval.py & Shared evaluation utilities, including QWK and reporting helpers. \\
+src/dataset.py & Thumbnail dataset and tile-aware dataset loading logic. \\
+src/tiles.py & Tile extraction, tile scoring, and artifact serialization. \\
+src/model.py & EfficientNet baseline and concat-tile-pooling model definitions. \\
+src/train.py & Main training entry point for single-fold experiments. \\
+src/oof.py & Fair out-of-fold evaluation for a full 5-fold model family. \\
+src/inference.py & Model loading, prediction helpers, and ensemble prediction. \\
+scripts/make_folds.py & One-time generation of the shared fold split. \\
+scripts/preprocess_tiles.py & Full-dataset tile preprocessing and artifact writing. \\
+notebooks/02\_train.ipynb & Kaggle wrapper for single-fold thumbnail training. \\
+notebooks/02b\_train\_all\_folds.ipynb & Kaggle runner for training all folds. \\
+notebooks/02c\_ensemble\_oof.ipynb & Fair OOF ensemble evaluation notebook. \\
+notebooks/03a\_train0fold\_tiles.ipynb & Kaggle workflow for tiles and initial tile training. \\
+notebooks/03\_external\_validation.ipynb & External validation workflow for PBGG-1. \\
+results.md & Append-only experiment log. \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\section{Technical Approach}
+
+\subsection{Data Pipeline}
+
+The baseline system uses a resized $512 \times 512$ thumbnail image per slide. The tile pipeline extends this by reading a whole-slide image or raster fallback image, padding it to the tile size, reshaping it into a grid, scoring tiles by tissue content, and keeping the top-$N$ tiles. The implementation supports saving tiles either as \texttt{.npy}/\texttt{.npz} arrays or vertically stacked \texttt{.png} files for inspection and Kaggle-friendly storage.
+
+\subsection{Modeling}
+
+Two model families are implemented:
+
+\begin{itemize}[leftmargin=*]
+    \item \textbf{Thumbnail baseline:} a single EfficientNet image encoder followed by a regression or ordinal head.
+    \item \textbf{Concat-tile-pooling model:} tiles are encoded independently, reshaped to slide-level tile features, average pooled over tiles, and mapped to an ISUP prediction.
+\end{itemize}
+
+The current training code supports \texttt{efficientnet-b0} and \texttt{efficientnet-b1} backbones as well as three losses: SmoothL1, MSE, and ordinal binary cross-entropy on cumulative thresholds.
+
+\subsection{Evaluation}
+
+Evaluation is built around a fixed 5-fold split stored in \texttt{data/train\_folds.csv}. Full-family evaluation uses OOF prediction: each fold's validation slides are scored only by the model that was trained without that fold. This produces:
+
+\begin{itemize}[leftmargin=*]
+    \item per-fold validation QWK,
+    \item mean $\pm$ standard deviation across folds,
+    \item global OOF QWK pooled across all slides.
+\end{itemize}
+
+Ensembling is performed fairly by averaging predictions from full model families on the same validation fold. External validation is planned on PBGG-1 to assess generalization beyond PANDA.
+
+\section{Current Project Status}
+
+As of June 4, 2026, the codebase is substantially further than the original scaffold:
+
+\begin{itemize}[leftmargin=*]
+    \item Thumbnail training, OOF evaluation, and fair ensemble scaffolding are implemented.
+    \item Tile extraction code and full-dataset preprocessing code are implemented.
+    \item \texttt{PandaTileDataset} is implemented and can load \texttt{.npy}, \texttt{.npz}, or stacked \texttt{.png} tile artifacts.
+    \item A first Kaggle tile dataset already exists for the team.
+    \item The external validation notebook exists in the repository, but the final PBGG-1 evaluation workflow still needs to be completed and reported.
+\end{itemize}
+
+\section{Results So Far}
+
+The main logged results to date are summarized in Table~\ref{tab:results}.
+
+\begin{table}[h]
+\centering
+\caption{Current PANDA results from the experiment log.}
+\label{tab:results}
+\begin{tabularx}{\textwidth}{l l l l X}
+\toprule
+Setting & Input & Loss & Scope & QWK \\
+\midrule
+EfficientNet-B0 & thumbnail & SmoothL1 & fold 0 & 0.7117 \\
+EfficientNet-B1 & thumbnail & SmoothL1 & fold 0 & 0.7125 \\
+EfficientNet-B0 & thumbnail & MSE & fold 0 & 0.7123 \\
+EfficientNet-B0 & thumbnail & ordinal BCE & fold 0 & 0.7314 \\
+EfficientNet-B0 & thumbnail & SmoothL1 & clean 5-fold OOF & 0.7116 $\pm$ 0.0106, global OOF 0.7116 \\
+EfficientNet-B0 & thumbnail & MSE & clean 5-fold OOF & 0.7030 $\pm$ 0.0055, global OOF 0.7030 \\
+EfficientNet-B0 & thumbnail & ordinal BCE & clean 5-fold OOF & global OOF 0.7244 \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+The current best thumbnail-only family is therefore \texttt{efficientnet-b0 + ordinal}, with a global OOF QWK of 0.7244. This is a meaningful improvement over the SmoothL1 and MSE baselines, but it is still below the final project target and below the score range expected from successful tile-based PANDA pipelines.
+
+The logged confusion behavior from the baseline experiments suggests that the model most often makes near-miss errors between adjacent grades and tends to under-call ISUP grade 5, which is a clinically important failure mode and one of the reasons tile-based localization is expected to help.
+
+\section{Work Remaining}
+
+\subsection{Track A: Data}
+
+\begin{itemize}[leftmargin=*]
+    \item Run the first full GPU tile-based fold-0 experiment.
+    \item Log the first comparable tile QWK in \texttt{results.md}.
+    \item Run the planned tile-count ablation at fixed tile size, for example $N \in \{16,32,36\}$.
+    \item Confirm and document the final Kaggle dataset slug, format, and directory layout for the rest of the team.
+    \item If raw TIFF access becomes practical, compare raw-slide tiles against the PNG fallback pipeline.
+\end{itemize}
+
+\subsection{Track B: Model}
+
+\begin{itemize}[leftmargin=*]
+    \item Treat \texttt{b0 + ordinal} as the current thumbnail reference.
+    \item Run the first real tile model with \texttt{efficientnet-b0}.
+    \item Compare tile configurations directly against the 0.7244 OOF thumbnail reference.
+    \item If tiles clearly win, train the selected tile configuration across all 5 folds.
+    \item Only after a stable tile baseline exists should optional techniques such as mixup be considered.
+\end{itemize}
+
+\subsection{Track C: Evaluation}
+
+\begin{itemize}[leftmargin=*]
+    \item Run a fair OOF ensemble using the best full-family checkpoints, especially SmoothL1 plus ordinal.
+    \item Log family-level and ensemble-level OOF metrics in \texttt{results.md}.
+    \item Complete the PBGG-1 evaluation workflow and report its QWK.
+    \item Add test-time augmentation only after the final selected family or ensemble is fixed.
+\end{itemize}
+
+\section{Definition of Project Success}
+
+This project will be considered successful if it satisfies the following four conditions:
+
+\begin{enumerate}[leftmargin=*]
+    \item \textbf{Code success:} the repository provides a clean end-to-end workflow for baseline, tiles, OOF evaluation, and final inference.
+    \item \textbf{Experimental success:} the team demonstrates that its chosen tile-based model or ensemble improves on the thumbnail baseline under fair evaluation.
+    \item \textbf{Performance success:} the final system approaches or exceeds the target of 0.83 mean QWK on PANDA and 0.65 QWK on PBGG-1.
+    \item \textbf{Reporting success:} the final paper includes a coherent problem statement, method description, ablation table, and external validation discussion.
+\end{enumerate}
+
+\section{Conclusion}
+
+The project already has a working baseline, fair OOF evaluation, tile extraction code, tile dataset loading, and an initial set of full-family thumbnail results. The most important remaining step is no longer building infrastructure from scratch; it is converting the existing tile pipeline into strong comparable GPU experiments and determining whether the tile-based model family can clearly surpass the current thumbnail ordinal reference. If that happens, the rest of the project becomes a focused evaluation and reporting problem rather than a pipeline-construction problem.
+
+\end{document}
