@@ -16,7 +16,14 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from src.tiles import extract_tiles_from_slide, save_tile_array, save_tile_stack
+from src.tiles import (
+    extract_tiles_from_slide,
+    read_raster_image,
+    read_slide_image,
+    save_tile_array,
+    save_tile_stack,
+    tile_grid_capacity,
+)
 
 try:
     from joblib import Parallel, delayed
@@ -45,6 +52,10 @@ def parse_args():
                     help='Parallel workers; 1 keeps execution sequential')
     ap.add_argument('--overwrite', action='store_true',
                     help='Recompute artifacts even if outputs already exist')
+    ap.add_argument('--preflight-sample', type=int, default=16,
+                    help='How many source images to inspect before preprocessing')
+    ap.add_argument('--fail-on-low-capacity', action='store_true',
+                    help='Abort if the sampled sources cannot supply n_tiles without padding')
     return ap.parse_args()
 
 
@@ -129,6 +140,63 @@ def process_one(image_id, slides_dir, output_dir, tile_size, n_tiles, level, sav
     return image_id, saved_paths
 
 
+def inspect_source_capacity(slide_path, tile_size, level):
+    suffix = slide_path.suffix.lower()
+    if suffix in ('.tif', '.tiff'):
+        image = read_slide_image(slide_path, level=level)
+        source_kind = 'tiff'
+    else:
+        image = read_raster_image(slide_path)
+        source_kind = 'raster'
+
+    height, width = image.shape[:2]
+    capacity = tile_grid_capacity(image.shape, tile_size)
+    return {
+        'source_kind': source_kind,
+        'height': int(height),
+        'width': int(width),
+        'capacity': int(capacity),
+        'path': str(slide_path),
+    }
+
+
+def run_preflight_capacity_check(image_ids, slides_dir, tile_size, n_tiles, level,
+                                 sample_size=16, fail_on_low_capacity=False):
+    sample_size = max(0, int(sample_size))
+    if sample_size == 0 or not image_ids:
+        return
+
+    sample_ids = image_ids[:min(sample_size, len(image_ids))]
+    rows = [
+        inspect_source_capacity(resolve_slide_path(slides_dir, image_id), tile_size, level)
+        for image_id in sample_ids
+    ]
+    capacities = [row['capacity'] for row in rows]
+    source_kinds = sorted({row['source_kind'] for row in rows})
+    dims_preview = ', '.join(
+        f"{row['width']}x{row['height']}"
+        for row in rows[:min(4, len(rows))]
+    )
+
+    print(
+        f'Preflight capacity ({len(rows)} sample slides, sources={source_kinds}): '
+        f'min={min(capacities)} median={int(pd.Series(capacities).median())} max={max(capacities)} '
+        f'for requested n_tiles={n_tiles}'
+    )
+    print(f'Example source dimensions: {dims_preview}')
+
+    if max(capacities) < n_tiles:
+        message = (
+            'Sampled source images cannot provide the requested tile count before white padding. '
+            f'Max sampled capacity was {max(capacities)} tiles, but n_tiles={n_tiles}. '
+            'This usually means the source directory contains low-resolution thumbnails '
+            'instead of whole-slide images.'
+        )
+        if fail_on_low_capacity:
+            raise RuntimeError(message)
+        print(f'WARNING: {message}')
+
+
 def main():
     args = parse_args()
     output_dir = Path(args.output_dir)
@@ -151,6 +219,15 @@ def main():
     print(f'{len(pending_ids)} to process, {skipped} already present')
     if not pending_ids:
         return
+    run_preflight_capacity_check(
+        pending_ids,
+        args.slides_dir,
+        args.tile_size,
+        args.n_tiles,
+        args.level,
+        sample_size=args.preflight_sample,
+        fail_on_low_capacity=args.fail_on_low_capacity,
+    )
     check_disk_budget(output_dir, len(pending_ids), args.tile_size, args.n_tiles, args.format)
 
     worker_args = (

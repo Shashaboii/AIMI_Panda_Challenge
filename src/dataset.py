@@ -99,6 +99,44 @@ def _read_rgb_image(path):
         return np.ascontiguousarray(img.convert('RGB'))
 
 
+def _load_npz_artifact(path):
+    with np.load(path, allow_pickle=False) as data:
+        if 'tiles' in data:
+            return data['tiles']
+        first_key = next(iter(data.files), None)
+        if first_key is None:
+            raise ValueError(f'No arrays found in {path}')
+        return data[first_key]
+
+
+def _load_png_stack_artifact(path):
+    if not os.path.exists(path):
+        raise FileNotFoundError(f'Could not read {path}')
+    img = _coerce_rgb_image(_read_rgb_image(path))
+    tile_size = img.shape[1]
+    if tile_size == 0 or img.shape[0] % tile_size != 0:
+        raise ValueError(
+            'PNG tile stacks must be saved as a vertical concat of square tiles; '
+            f'got shape {tuple(img.shape)} from {path}'
+        )
+    n_tiles = img.shape[0] // tile_size
+    return img.reshape(n_tiles, tile_size, tile_size, 3)
+
+
+def load_tile_artifact(path):
+    """Load one tile artifact file into ``[N, H, W, C]`` uint8 tiles."""
+    ext = Path(path).suffix.lower()
+    if ext == '.npy':
+        tiles = np.load(path, allow_pickle=False)
+    elif ext == '.npz':
+        tiles = _load_npz_artifact(path)
+    elif ext == '.png':
+        tiles = _load_png_stack_artifact(path)
+    else:
+        raise ValueError(f'Unsupported tile artifact extension {ext!r}')
+    return _coerce_tile_array(tiles)
+
+
 class PandaDataset(Dataset):
     """Baseline dataset: one 512x512 thumbnail per slide.
 
@@ -168,28 +206,6 @@ class PandaTileDataset(Dataset):
                 artifact_paths[stem] = str(path)
         return artifact_paths
 
-    def _load_npz(self, path):
-        with np.load(path, allow_pickle=False) as data:
-            if 'tiles' in data:
-                return data['tiles']
-            first_key = next(iter(data.files), None)
-            if first_key is None:
-                raise ValueError(f'No arrays found in {path}')
-            return data[first_key]
-
-    def _load_png_stack(self, path):
-        if not os.path.exists(path):
-            raise FileNotFoundError(f'Could not read {path}')
-        img = _coerce_rgb_image(_read_rgb_image(path))
-        tile_size = img.shape[1]
-        if tile_size == 0 or img.shape[0] % tile_size != 0:
-            raise ValueError(
-                'PNG tile stacks must be saved as a vertical concat of square tiles; '
-                f'got shape {tuple(img.shape)} from {path}'
-            )
-        n_tiles = img.shape[0] // tile_size
-        return img.reshape(n_tiles, tile_size, tile_size, 3)
-
     def _load_tiles(self, image_id):
         path = self.artifact_paths.get(str(image_id))
         if path is None:
@@ -197,18 +213,7 @@ class PandaTileDataset(Dataset):
                 f'No tile artifact found for {image_id} in {self.image_dir}; '
                 f'looked for {", ".join(TILE_ARTIFACT_EXTS)}'
             )
-
-        ext = Path(path).suffix.lower()
-        if ext == '.npy':
-            tiles = np.load(path, allow_pickle=False)
-        elif ext == '.npz':
-            tiles = self._load_npz(path)
-        elif ext == '.png':
-            tiles = self._load_png_stack(path)
-        else:
-            raise ValueError(f'Unsupported tile artifact extension {ext!r}')
-
-        return _coerce_tile_array(tiles)
+        return load_tile_artifact(path)
 
     def __getitem__(self, i):
         row = self.df.iloc[i]

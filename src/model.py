@@ -45,7 +45,21 @@ class EfficientNetBaseline(nn.Module):
 
 
 class ConcatTilePoolingModel(nn.Module):
-    """Tile model: pool backbone features across N tiles per slide."""
+    """Tile model: pool backbone features across N tiles per slide.
+
+    The original mean-pool version was very sensitive to noisy tail tiles:
+    once the first tissue-rich tiles were averaged together with near-empty
+    ones, validation QWK dropped sharply as ``N`` increased. This version keeps
+    the same public API but uses a more robust parameter-free pooler:
+
+      - detect padded / near-blank tiles from the input variance
+      - compute a soft attention score from tile feature energy
+      - combine attention pooling with max pooling so one strong tile is not
+        washed out by many weak ones
+
+    The output dimensionality stays the same, so ``train.py`` and the baseline
+    head contract do not need to change.
+    """
     def __init__(self, backbone_name='efficientnet-b0', pretrained=True,
                  dropout=0.3, out_dim=1):
         super().__init__()
@@ -55,10 +69,45 @@ class ConcatTilePoolingModel(nn.Module):
             nn.Linear(in_features, out_dim),
         )
 
+    def _tile_mask(self, x):
+        flat = x.reshape(x.shape[0], x.shape[1], -1)
+        return flat.var(dim=-1, unbiased=False) > 1e-6
+
+    def _pool_tiles(self, features, tile_mask):
+        if tile_mask is not None:
+            # If a row somehow contains only padded tiles, fall back to keeping
+            # every tile valid so softmax / max remain well-defined.
+            all_invalid = ~tile_mask.any(dim=1)
+            if all_invalid.any():
+                tile_mask = tile_mask.clone()
+                tile_mask[all_invalid] = True
+
+        tile_scores = features.pow(2).mean(dim=-1)
+        if tile_mask is not None:
+            tile_scores = tile_scores.masked_fill(~tile_mask, -1e9)
+
+        attn = torch.softmax(tile_scores, dim=1)
+        attn_pooled = (features * attn.unsqueeze(-1)).sum(dim=1)
+
+        if tile_mask is not None:
+            max_features = features.masked_fill(~tile_mask.unsqueeze(-1), -1e9)
+            max_pooled = max_features.max(dim=1).values
+            max_pooled = torch.where(
+                torch.isfinite(max_pooled),
+                max_pooled,
+                attn_pooled,
+            )
+        else:
+            max_pooled = features.max(dim=1).values
+
+        return 0.5 * (attn_pooled + max_pooled)
+
     def forward(self, x):
         if x.ndim != 5:
             raise ValueError(f'Expected tile input [B, N, C, H, W], got shape {tuple(x.shape)}')
         batch_size, n_tiles, channels, height, width = x.shape
+        tile_mask = self._tile_mask(x)
         x = x.reshape(batch_size * n_tiles, channels, height, width)
         features = self.backbone(x).reshape(batch_size, n_tiles, -1)
-        return self.head(features.mean(dim=1)).squeeze(-1)
+        pooled = self._pool_tiles(features, tile_mask)
+        return self.head(pooled).squeeze(-1)

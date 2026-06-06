@@ -60,6 +60,30 @@ def read_raster_image(image_path):
         return _ensure_rgb_uint8(img.convert('RGB'))
 
 
+def tile_grid_shape(image_or_shape, tile_size):
+    """Return padded tile-grid dimensions ``(grid_h, grid_w)`` for an image."""
+    if tile_size <= 0:
+        raise ValueError('tile_size must be positive')
+
+    if hasattr(image_or_shape, 'shape'):
+        shape = tuple(image_or_shape.shape)
+    else:
+        shape = tuple(image_or_shape)
+    if len(shape) < 2:
+        raise ValueError(f'Expected image shape with at least 2 dims, got {shape}')
+
+    height, width = int(shape[0]), int(shape[1])
+    pad_h = (-height) % tile_size
+    pad_w = (-width) % tile_size
+    return (height + pad_h) // tile_size, (width + pad_w) // tile_size
+
+
+def tile_grid_capacity(image_or_shape, tile_size):
+    """Return how many tiles fit after padding to ``tile_size`` multiples."""
+    grid_h, grid_w = tile_grid_shape(image_or_shape, tile_size)
+    return grid_h * grid_w
+
+
 def pad_to_tile_size(image, tile_size, pad_value=WHITE_PIXEL):
     """Pad HWC image with white pixels so both spatial dims divide tile_size."""
     if tile_size <= 0:
