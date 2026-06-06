@@ -84,13 +84,13 @@ class ConcatTilePoolingModel(nn.Module):
 
         tile_scores = features.pow(2).mean(dim=-1)
         if tile_mask is not None:
-            tile_scores = tile_scores.masked_fill(~tile_mask, -1e9)
+            tile_scores = tile_scores.masked_fill(~tile_mask, float('-inf'))
 
         attn = torch.softmax(tile_scores, dim=1)
         attn_pooled = (features * attn.unsqueeze(-1)).sum(dim=1)
 
         if tile_mask is not None:
-            max_features = features.masked_fill(~tile_mask.unsqueeze(-1), -1e9)
+            max_features = features.masked_fill(~tile_mask.unsqueeze(-1), float('-inf'))
             max_pooled = max_features.max(dim=1).values
             max_pooled = torch.where(
                 torch.isfinite(max_pooled),
