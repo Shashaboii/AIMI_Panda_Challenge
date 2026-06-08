@@ -1,0 +1,8 @@
+figure,metric,value
+qwk_oof_model_comparison,MSE 5-fold OOF QWK,0.703
+qwk_oof_model_comparison,SmoothL1 recovered OOF QWK,0.7146936771887609
+qwk_oof_model_comparison,Ordinal recovered OOF QWK,0.7244322937963763
+qwk_oof_model_comparison,Ordinal clean 5-epoch OOF QWK,0.7221
+tile_artifact_audit,mean real tiles,5.356
+tile_artifact_audit,mean blank tiles,30.644
+tile_artifact_audit,maximum audited real tiles,9.0

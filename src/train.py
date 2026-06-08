@@ -160,9 +160,7 @@ def make_targets(y, args):
 
 
 def outputs_to_preds(out, args):
-    if args.loss == 'ordinal':
-        return (torch.sigmoid(out) > 0.5).sum(dim=1).cpu().numpy()
-    return out.cpu().numpy()
+    return out.detach().cpu().numpy()
 
 
 def use_amp(args, device):
@@ -206,6 +204,8 @@ def main():
     ap.add_argument('--backbone', default='efficientnet-b0')
     ap.add_argument('--dropout', type=float, default=0.3)
     ap.add_argument('--loss', choices=['smoothl1', 'mse', 'ordinal'], default='smoothl1')
+    ap.add_argument('--ordinal-mode', choices=['threshold', 'expected'], default='threshold',
+                    help='How to decode ordinal logits for validation QWK')
     ap.add_argument('--n-tiles', type=int,
                     help='Tile count metadata for experiment naming, e.g. 36')
     ap.add_argument('--tile-size', type=int,
@@ -228,6 +228,7 @@ def main():
         'Config:',
         f'backbone={args.backbone}',
         f'loss={args.loss}',
+        f'ordinal_mode={args.ordinal_mode}',
         f'dropout={args.dropout}',
         f'batch_size={args.batch_size}',
         f'num_workers={args.num_workers}',
@@ -305,7 +306,7 @@ def main():
                 targs.append(yb.numpy())
         preds = np.concatenate(preds)
         targs = np.concatenate(targs).astype(int)
-        val_qwk = qwk(preds, targs)
+        val_qwk = qwk(preds, targs, ordinal_mode=args.ordinal_mode)
 
         elapsed = (time.time() - t0) / 60.0
         print(f'ep{epoch}  train_loss={train_loss:.4f}  val_QWK={val_qwk:.4f}  '

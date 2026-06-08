@@ -6,6 +6,13 @@ Every training run goes here. Append-only — even null results stay, they're pa
 
 The Kaggle public leaderboard is unavailable for PANDA — the competition closed in 2020 and late submissions return "Notebook Threw Exception (after deadline)" without a score. **LB QWK is blank for all entries.** Our primary metric is held-out fold QWK from the shared 5-fold split (`data/train_folds.csv`).
 
+## Current references
+
+- Best clean SmoothL1 5-fold training-run baseline: `0.7116` from `baseline-thumbnails-b0-5fold-clean`
+- Best recovered SmoothL1 5-fold OOF CSV in hand: `0.7147` from `5fold_smoothl1_oof_predictions.csv`
+- Best thumbnail ordinal OOF baseline in hand: `0.7244` from `5fold_ordinal_oof_predictions.csv` (`baseline-thumbnails-b0-ordinal-5fold`)
+- Current `panda_tiles_36x192_png` artifact set is not valid for 5-fold tile training because most tiles are white padding rather than real tissue tiles
+
 ## Columns
 
 - **Date** — YYYY-MM-DD
@@ -37,9 +44,28 @@ The Kaggle public leaderboard is unavailable for PANDA — the competition close
 | 2026-06-06 | B | tiles32-imsize192-b0-ordinal-fold0 | effnet-b0, 32 tiles kept at loader time from 36x192 PNG tile artifacts, fold 0, 6 epochs, lr 3e-4, ordinal BCE, dropout 0.3 | 0.6676 | — | — | Second real GPU concat-tile-pooling run family on Track A tile artifacts using `--n-tiles 32` with `/kaggle/input/datasets/franciscacarneiro/panda-tiles-36x192-png/panda_tiles_36x192_png`. Saved `/kaggle/working/efficientnetb0_tiles32_imsize192_ordinal_fold0.pth`. Slightly better than the 36-tile run but still worse than both the 16-tile variant and the thumbnail ordinal fold-0 baseline of 0.7314. |
 | 2026-06-06 | B | tiles36-imsize192-b0-ordinal-fold0 | effnet-b0, 36 tiles, 192 tile size, fold 0, 6 epochs, lr 3e-4, ordinal BCE, dropout 0.3 | 0.6720 | — | — | First real GPU concat-tile-pooling run on Track A tile artifacts using `/kaggle/input/datasets/franciscacarneiro/panda-tiles-36x192-png/panda_tiles_36x192_png`. Saved `/kaggle/working/efficientnetb0_tiles36_imsize192_ordinal_fold0.pth`. Completed cleanly but underperformed both the 16-tile variant and the thumbnail ordinal fold-0 baseline of 0.7314. |
 | 2026-06-06 | B | baseline-thumbnails-b0-ordinal-fold0-5ep | effnet-b0, 512 thumbnail, fold 0, 5 epochs, lr 3e-4, ordinal BCE, dropout 0.3 | 0.7243 | — | — | Reran the PNG thumbnail baseline on xhlulu 512x512 resized images for 5 epochs. Saved `/kaggle/working/efficientnetb0_ordinal_fold0.pth`. |
-| 2026-06-07 | B | baseline-thumbnails-b0-ordinal-5fold-5ep | effnet-b0, 512 thumbnail, 5 folds, 5 epochs, lr 3e-4, ordinal BCE, dropout 0.3 | 0.7220 (OOF) | 0.7221 ± 0.0095 | — | Clean 5-fold rerun on xhlulu 512x512 PNG thumbnails. Fold scores: 0.7297 / 0.7067 / 0.7342 / 0.7203 / 0.7197. Wrote `/kaggle/working/efficientnetb0_ordinal_oof_predictions.csv` with 10,616 rows and saved `efficientnetb0_ordinal_fold{0..4}.pth`. |
-| 2026-06-07 | B | baseline-thumbnails-b0-ordinal-5fold-5ep | effnet-b0, 512 thumbnail, 5 folds, 5 epochs, lr 3e-4, ordinal BCE, dropout 0.3 | 0.7221 (OOF) | 0.7221 ± 0.0095 | — | Clean 5-fold rerun on xhlulu 512x512 PNG thumbnails. Fold scores: 0.7297 / 0.7068 / 0.7342 / 0.7203 / 0.7197. Wrote `/kaggle/working/ensemble_oof_predictions.csv`; however, `pred_ensemble` is identical to `pred_b0_ordinal`, so this should be treated as a single-model ordinal OOF result rather than a true ensemble. Confusion matrix shows strong performance for ISUP 0 but continued adjacent-grade confusion, especially among ISUP 3–5. |
-Ensemble confusion matrix (rows = true ISUP grade, cols = predicted ISUP grade):
+| 2026-06-07 | B | baseline-thumbnails-b0-ordinal-5fold-5ep | effnet-b0, 512 thumbnail, 5 folds, 5 epochs, lr 3e-4, ordinal BCE, dropout 0.3 | 0.7221 (OOF) | 0.7221 ± 0.0095 | — | Clean 5-fold rerun on xhlulu 512x512 PNG thumbnails. Fold scores: 0.7297 / 0.7068 / 0.7342 / 0.7203 / 0.7197. Wrote `/kaggle/working/ensemble_oof_predictions.csv`; `pred_ensemble` was identical to `pred_b0_ordinal`, so this should be treated as a single-model ordinal OOF result rather than a true ensemble. Saved `efficientnetb0_ordinal_fold{0..4}.pth`. Confusion matrix is listed below. |
+| 2026-06-07 | B | tiles36-imsize192-artifact-audit | audit only, `scripts/audit_tile_artifacts.py` on `panda_tiles_36x192_png` | — | — | — | Full artifact audit found the current PNG tile dataset is invalid as a tile benchmark: all 10,616 slides had only `0..9` real tiles, with mean `5.356` and median `5.0` real tiles per slide out of 36. Blank-tile count had mean `30.644` and median `31.0`. This matches a `512x512` thumbnail source tiled at `192`, so the current 16/32/36 fold-0 sweep should be treated as a bad-input result, not evidence against tile models. Do not start 5-fold tile training on this artifact set. |
+
+## Analysis notes
+
+### Local recovered OOF CSV comparison (2026-06-07)
+
+- Re-scored the local CSVs with `src.eval.qwk()`, the repo's shared metric path.
+- `5fold_smoothl1_oof_predictions.csv`: `0.7147` global OOF QWK.
+- `5fold_ordinal_oof_predictions.csv`: `0.7244` global OOF QWK.
+- Ordinal beat SmoothL1 on every fold:
+  - fold 0: `0.7314` vs `0.7132`
+  - fold 1: `0.7126` vs `0.7067`
+  - fold 2: `0.7411` vs `0.7271`
+  - fold 3: `0.7140` vs `0.7094`
+  - fold 4: `0.7233` vs `0.7169`
+- The biggest practical gains were at the extremes: ISUP 0 recall improved from `60.9%` to `69.5%`, and ISUP 5 recall improved from `23.0%` to `41.3%`.
+- SmoothL1 stayed slightly stronger on some middle grades, but not enough to offset the overall QWK gap, so ordinal remains the thumbnail baseline that tile models need to beat.
+
+### Ordinal 5-fold 5-epoch rerun confusion matrix (`0.7221` OOF)
+
+Rows = true ISUP grade, columns = predicted ISUP grade.
 
 | true \ pred | 0 | 1 | 2 | 3 | 4 | 5 |
 |---|---:|---:|---:|---:|---:|---:|
@@ -49,3 +75,29 @@ Ensemble confusion matrix (rows = true ISUP grade, cols = predicted ISUP grade):
 | 3 | 44 | 185 | 269 | 352 | 282 | 110 |
 | 4 | 54 | 202 | 153 | 255 | 412 | 173 |
 | 5 | 46 | 85 | 74 | 151 | 362 | 506 |
+
+### SmoothL1 recovered OOF confusion matrix (`0.7147` OOF)
+
+Rows = true ISUP grade, columns = predicted ISUP grade.
+
+| true \ pred | 0 | 1 | 2 | 3 | 4 | 5 |
+|---|---:|---:|---:|---:|---:|---:|
+| 0 | 1762 | 930 | 125 | 39 | 28 | 8 |
+| 1 | 446 | 1358 | 642 | 182 | 34 | 4 |
+| 2 | 87 | 368 | 504 | 280 | 99 | 5 |
+| 3 | 35 | 171 | 300 | 371 | 320 | 45 |
+| 4 | 37 | 177 | 217 | 291 | 431 | 96 |
+| 5 | 31 | 80 | 110 | 191 | 531 | 281 |
+
+### Ordinal recovered OOF confusion matrix (`0.7244` OOF)
+
+Rows = true ISUP grade, columns = predicted ISUP grade.
+
+| true \ pred | 0 | 1 | 2 | 3 | 4 | 5 |
+|---|---:|---:|---:|---:|---:|---:|
+| 0 | 2011 | 705 | 71 | 61 | 34 | 10 |
+| 1 | 533 | 1374 | 522 | 176 | 56 | 5 |
+| 2 | 94 | 422 | 463 | 243 | 94 | 27 |
+| 3 | 42 | 167 | 283 | 369 | 275 | 106 |
+| 4 | 55 | 187 | 165 | 253 | 408 | 181 |
+| 5 | 47 | 81 | 78 | 161 | 352 | 505 |
