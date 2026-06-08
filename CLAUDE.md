@@ -21,9 +21,8 @@ PANDA (Prostate cANcer graDe Assessment) Kaggle challenge as the AIMI 2526 final
 
 So our evaluation is:
 1. **Primary**: 5-fold stratified CV on the PANDA training set (stratified jointly by ISUP grade and data provider). Mean ± std QWK across 5 folds. Fold assignment in `data/train_folds.csv` is fixed — don't regenerate it.
-2. **Secondary**: external validation on PBGG-1 (50 slides graded by 10 pathologists, from Tolkach et al. 2023, [Zenodo](https://zenodo.org/records/8102833)).
 
-This is the methodology used by Bulten et al.'s Nature Medicine paper, so it's defensible scientifically.
+This keeps the project evaluation simple, reproducible, and internally consistent.
 
 ## Team and ownership
 
@@ -31,7 +30,7 @@ Each track owns its own code module(s) in `src/`. Cross-cutting changes go to th
 
 - **Person A — Data pipeline.** Owns `src/dataset.py`, `src/tiles.py` (to be created), and the `data/train_folds.csv`. See `docs/track_A_data.md`.
 - **Person B — Model and training.** Owns `src/model.py`, `src/train.py`. See `docs/track_B_model.md`.
-- **Person C — Eval, ensembling, external validation.** Owns `src/eval.py`, `src/inference.py`, `notebooks/03_external_validation.ipynb`. See `docs/track_C_eval.md`.
+- **Person C — Eval and ensembling.** Owns `src/eval.py`, `src/inference.py`, and OOF / ensemble reporting. See `docs/track_C_eval.md`.
 
 ## Current status
 
@@ -41,9 +40,9 @@ Each track owns its own code module(s) in `src/`. Cross-cutting changes go to th
 
 ## Goal
 
-Final submission with **5-fold mean QWK ≥ 0.83 on PANDA** and **QWK ≥ 0.65 on PBGG-1**. Plus a 4-page IEEE paper and reproducible GitHub repo.
+Final submission with **5-fold mean QWK ≥ 0.83 on PANDA**, plus a 4-page IEEE paper and reproducible GitHub repo.
 
-Not trying to beat the winners' 0.94 — trying to learn the techniques and execute them cleanly in 4 weeks. 0.85 with a clean methodology and external validation is a stronger student project than 0.92 with a copied solution.
+Not trying to beat the winners' 0.94 — trying to learn the techniques and execute them cleanly in 4 weeks. A strong reproducible PANDA result is better than an overextended project plan.
 
 ## Approach (minimum viable plan)
 
@@ -92,4 +91,3 @@ Example good prompts:
 
 - Cluster access: pending — to ask Colin Jacobs at next supervision meeting.
 - Kaggle GPU quota across three accounts is ~90 hrs/week, plenty for the planned experiments.
-- PBGG-1 download: someone needs to mirror to a Kaggle Dataset so all team members can attach it.

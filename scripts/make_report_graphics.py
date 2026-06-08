@@ -35,12 +35,16 @@ from src.eval import qwk, round_preds  # noqa: E402
 COLORS = {
     "smooth": "#4C78A8",
     "ordinal": "#54A24B",
+    "b1": "#2A9D8F",
     "mse": "#A05D56",
     "tile": "#E45756",
     "gray": "#6E7781",
     "light_gray": "#E8ECEF",
     "dark": "#222222",
 }
+
+
+B1_ORDINAL_5FOLD_QWK = 0.7334329195498388
 
 
 def save_figure(fig: plt.Figure, stem: str) -> None:
@@ -74,6 +78,7 @@ def make_oof_model_comparison(smooth: pd.DataFrame, ordinal: pd.DataFrame) -> No
         ("B0 thumbnail + MSE", 0.7030, COLORS["mse"]),
         ("B0 thumbnail + SmoothL1", qwk(smooth["pred_b0_smoothl1"], smooth["isup_grade"]), COLORS["smooth"]),
         ("B0 thumbnail + ordinal BCE", qwk(ordinal["pred_b0_ordinal"], ordinal["isup_grade"]), COLORS["ordinal"]),
+        ("B1 thumbnail + ordinal BCE\n(5-fold logged OOF)", B1_ORDINAL_5FOLD_QWK, COLORS["b1"]),
         ("B0 thumbnail + ordinal BCE\n(clean 5-epoch rerun)", 0.7221, "#88C35F"),
     ]
 
@@ -315,6 +320,11 @@ def write_summary_csv(smooth: pd.DataFrame, ordinal: pd.DataFrame) -> None:
             "figure": "qwk_oof_model_comparison",
             "metric": "Ordinal recovered OOF QWK",
             "value": qwk(ordinal["pred_b0_ordinal"], ordinal["isup_grade"]),
+        },
+        {
+            "figure": "qwk_oof_model_comparison",
+            "metric": "B1 ordinal 5-fold logged OOF QWK",
+            "value": B1_ORDINAL_5FOLD_QWK,
         },
         {"figure": "qwk_oof_model_comparison", "metric": "Ordinal clean 5-epoch OOF QWK", "value": 0.7221},
         {"figure": "tile_artifact_audit", "metric": "mean real tiles", "value": 5.356},

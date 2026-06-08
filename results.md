@@ -10,7 +10,8 @@ The Kaggle public leaderboard is unavailable for PANDA — the competition close
 
 - Best clean SmoothL1 5-fold training-run baseline: `0.7116` from `baseline-thumbnails-b0-5fold-clean`
 - Best recovered SmoothL1 5-fold OOF CSV in hand: `0.7147` from `5fold_smoothl1_oof_predictions.csv`
-- Best thumbnail ordinal OOF baseline in hand: `0.7244` from `5fold_ordinal_oof_predictions.csv` (`baseline-thumbnails-b0-ordinal-5fold`)
+- Best recovered B0 ordinal 5-fold OOF CSV in hand: `0.7244` from `5fold_ordinal_oof_predictions.csv` (`baseline-thumbnails-b0-ordinal-5fold`)
+- Best logged thumbnail 5-fold OOF baseline overall: `0.7334` from `baseline-thumbnails-b1-ordinal-5fold`
 - Current `panda_tiles_36x192_png` artifact set is not valid for 5-fold tile training because most tiles are white padding rather than real tissue tiles
 
 ## Columns
@@ -46,14 +47,35 @@ The Kaggle public leaderboard is unavailable for PANDA — the competition close
 | 2026-06-06 | B | baseline-thumbnails-b0-ordinal-fold0-5ep | effnet-b0, 512 thumbnail, fold 0, 5 epochs, lr 3e-4, ordinal BCE, dropout 0.3 | 0.7243 | — | — | Reran the PNG thumbnail baseline on xhlulu 512x512 resized images for 5 epochs. Saved `/kaggle/working/efficientnetb0_ordinal_fold0.pth`. |
 | 2026-06-07 | B | baseline-thumbnails-b0-ordinal-5fold-5ep | effnet-b0, 512 thumbnail, 5 folds, 5 epochs, lr 3e-4, ordinal BCE, dropout 0.3 | 0.7221 (OOF) | 0.7221 ± 0.0095 | — | Clean 5-fold rerun on xhlulu 512x512 PNG thumbnails. Fold scores: 0.7297 / 0.7068 / 0.7342 / 0.7203 / 0.7197. Wrote `/kaggle/working/ensemble_oof_predictions.csv`; `pred_ensemble` was identical to `pred_b0_ordinal`, so this should be treated as a single-model ordinal OOF result rather than a true ensemble. Saved `efficientnetb0_ordinal_fold{0..4}.pth`. Confusion matrix is listed below. |
 | 2026-06-07 | B | tiles36-imsize192-artifact-audit | audit only, `scripts/audit_tile_artifacts.py` on `panda_tiles_36x192_png` | — | — | — | Full artifact audit found the current PNG tile dataset is invalid as a tile benchmark: all 10,616 slides had only `0..9` real tiles, with mean `5.356` and median `5.0` real tiles per slide out of 36. Blank-tile count had mean `30.644` and median `31.0`. This matches a `512x512` thumbnail source tiled at `192`, so the current 16/32/36 fold-0 sweep should be treated as a bad-input result, not evidence against tile models. Do not start 5-fold tile training on this artifact set. |
+| 2026-06-08 | B | baseline-thumbnails-b1-ordinal-5fold | effnet-b1, 512 thumbnail, 5 folds, 6 epochs, lr 3e-4, ordinal BCE, dropout 0.3 | 0.7334 (OOF) | 0.7334 ± 0.0094 | — | Full 5-fold EfficientNet-B1 ordinal rerun from Kaggle log output. Training log commit: `e415ba7`. Fold scores: 0.7324 / 0.7280 / 0.7466 / 0.7196 / 0.7404. Wrote `/kaggle/working/efficientnetb1_ordinal_oof_predictions.csv` with 10,616 rows plus `efficientnetb1_ordinal_fold{0..4}.pth` (~26.52 MB each). Separate OOF / ensemble log on commit `0571898` matched the same fold scores and confusion matrix; `pred_ensemble` was identical to the single `b1-ordinal-5fold` family, so this should still be treated as a single-model B1 ordinal OOF result rather than a true ensemble. |
 
 ## Analysis notes
+
+### EfficientNet-B1 ordinal 5-fold confusion matrix (`0.7334` OOF)
+
+- Fold scores from the Kaggle log: `0.7324 / 0.7280 / 0.7466 / 0.7196 / 0.7404`
+- 5-fold mean: `0.7334 ± 0.0094`
+- Training log reported `efficientnetb1_ordinal_oof_predictions.csv` with `10,616` rows and global OOF QWK `0.7334`
+- Separate OOF / ensemble log matched the same per-fold scores and confusion matrix
+- `ensemble` matched the single `b1-ordinal-5fold` model output on every fold
+
+Rows = true ISUP grade, columns = predicted ISUP grade.
+
+| true \ pred | 0 | 1 | 2 | 3 | 4 | 5 |
+|---|---:|---:|---:|---:|---:|---:|
+| 0 | 2092 | 669 | 49 | 39 | 35 | 8 |
+| 1 | 573 | 1430 | 462 | 146 | 49 | 6 |
+| 2 | 100 | 465 | 446 | 233 | 82 | 17 |
+| 3 | 39 | 203 | 270 | 356 | 284 | 90 |
+| 4 | 59 | 187 | 150 | 282 | 417 | 154 |
+| 5 | 50 | 67 | 80 | 182 | 375 | 470 |
 
 ### Local recovered OOF CSV comparison (2026-06-07)
 
 - Re-scored the local CSVs with `src.eval.qwk()`, the repo's shared metric path.
 - `5fold_smoothl1_oof_predictions.csv`: `0.7147` global OOF QWK.
 - `5fold_ordinal_oof_predictions.csv`: `0.7244` global OOF QWK.
+- A newer logged run, `baseline-thumbnails-b1-ordinal-5fold`, reached `0.7334` OOF and is now the best thumbnail baseline overall, but its OOF CSV is not stored locally in this repo.
 - Ordinal beat SmoothL1 on every fold:
   - fold 0: `0.7314` vs `0.7132`
   - fold 1: `0.7126` vs `0.7067`
