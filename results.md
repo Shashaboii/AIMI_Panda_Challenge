@@ -11,7 +11,7 @@ The Kaggle public leaderboard is unavailable for PANDA — the competition close
 - Best clean SmoothL1 5-fold training-run baseline: `0.7116` from `baseline-thumbnails-b0-5fold-clean`
 - Best recovered SmoothL1 5-fold OOF CSV in hand: `0.7147` from `5fold_smoothl1_oof_predictions.csv`
 - Best recovered B0 ordinal 5-fold OOF CSV in hand: `0.7244` from `5fold_ordinal_oof_predictions.csv` (`baseline-thumbnails-b0-ordinal-5fold`)
-- Best logged thumbnail 5-fold OOF baseline overall: `0.7334` from `baseline-thumbnails-b1-ordinal-5fold`
+- Best locally stored B1 ordinal 5-fold OOF CSV overall: `0.7334` from `5fold_b1_oof_predictions.csv` (`baseline-thumbnails-b1-ordinal-5fold`)
 - Current `panda_tiles_36x192_png` artifact set is not valid for 5-fold tile training because most tiles are white padding rather than real tissue tiles
 
 ## Columns
@@ -75,7 +75,7 @@ Rows = true ISUP grade, columns = predicted ISUP grade.
 - Re-scored the local CSVs with `src.eval.qwk()`, the repo's shared metric path.
 - `5fold_smoothl1_oof_predictions.csv`: `0.7147` global OOF QWK.
 - `5fold_ordinal_oof_predictions.csv`: `0.7244` global OOF QWK.
-- A newer logged run, `baseline-thumbnails-b1-ordinal-5fold`, reached `0.7334` OOF and is now the best thumbnail baseline overall, but its OOF CSV is not stored locally in this repo.
+- The final local `5fold_b1_oof_predictions.csv` for `baseline-thumbnails-b1-ordinal-5fold` reached `0.7334` OOF and is now the best thumbnail baseline overall.
 - Ordinal beat SmoothL1 on every fold:
   - fold 0: `0.7314` vs `0.7132`
   - fold 1: `0.7126` vs `0.7067`
