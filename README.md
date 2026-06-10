@@ -23,7 +23,7 @@ Validation is fold 0 (`StratifiedKFold`, `random_state=42`), 2,124 held-out slid
 |---|---|---|---|---|
 | EfficientNet-B0 (ours, 20 epochs from cache) | **0.876** | 43 | 72 | ~0.89 |
 | UNI + attention-MIL | 0.859 | 62 | 120 | ~0.86 |
-| EfficientNet-B0 (public, 30 epochs — reference) | — | — | — | 0.915 |
+
 
 \* predicted benign (ISUP 0) when cancer was present — the clinically dangerous error.
 \*\* predicted cancer when truly benign.
