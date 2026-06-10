@@ -1,0 +1,22 @@
+# Core
+numpy
+pandas
+scikit-learn
+matplotlib
+seaborn
+tqdm
+Pillow
+
+# Deep learning
+torch
+torchvision
+timm>=0.9.0
+
+# Pathology / image I/O
+openslide-python      # also needs system lib: apt-get install -y openslide-tools
+imagecodecs
+tifffile
+albumentations
+
+# Foundation model download (notebook 05 only)
+huggingface_hub

@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+# large artefacts live as Kaggle Datasets, not in git
+*.pth
+*.npy
+*.tiff
+tiles_cache/
+uni_embeddings/
+uni_weights/
+submission.csv
