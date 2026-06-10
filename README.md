@@ -1,5 +1,5 @@
-<<<<<<< HEAD
-# Automated Gleason / ISUP Grading of Prostate Biopsies (PANDA)
+
+# Prostate cANcer graDe Assessment (PANDA) Challenge
 
 Predicting the **ISUP grade (0–5)** of prostate-biopsy whole-slide images (WSIs) from
 the [PANDA challenge](https://www.kaggle.com/c/prostate-cancer-grade-assessment).
