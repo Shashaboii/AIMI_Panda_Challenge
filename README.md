@@ -25,8 +25,8 @@ Validation is fold 0 (`StratifiedKFold`, `random_state=42`), 2,124 held-out slid
 | UNI + attention-MIL | 0.859 | 62 | 120 | ~0.86 |
 
 
-\ predicted benign (ISUP 0) when cancer was present,the clinically dangerous error.
-\ predicted cancer when truly benign.
+predicted benign (ISUP 0) when cancer was present,the clinically dangerous error.
+predicted cancer when truly benign.
 
 **Cross-centre generalisation** (train one centre, test the other) is produced by
 `06_uni_train_mil_head.ipynb` — see its `cross()` output.
