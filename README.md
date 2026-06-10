@@ -25,15 +25,12 @@ Validation is fold 0 (`StratifiedKFold`, `random_state=42`), 2,124 held-out slid
 | UNI + attention-MIL | 0.859 | 62 | 120 | ~0.86 |
 
 
-predicted benign (ISUP 0) when cancer was present,the clinically dangerous error.
-predicted cancer when truly benign.
-
 **Cross-centre generalisation** (train one centre, test the other) is produced by
 `06_uni_train_mil_head.ipynb` — see its `cross()` output.
 
 **Data-quality finding:** ISUP is derived deterministically from the Gleason score, so
-we checked all 10,616 slides for consistency — only **1 mismatch (0.01%)**. The
-recorded labels are therefore internally consistent; the residual label noise comes
+we checked all 10,616 slides for consistency. Only **1 mismatch (0.01%)**. The
+recorded labels are therefore internally consistent, the residual label noise comes
 from grading subjectivity (inter-observer variability), not data-entry errors, which is
 why model errors cluster on **adjacent** grades rather than on the mismatch slides.
 
