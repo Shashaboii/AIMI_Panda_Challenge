@@ -1,0 +1,161 @@
+\documentclass[conference]{IEEEtran}
+\IEEEoverridecommandlockouts
+
+\usepackage{cite}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{graphicx}
+\usepackage{textcomp}
+\usepackage{xcolor}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{url}
+
+\graphicspath{{../docs/graphics/}{./}}
+
+\def\BibTeX{{\rm B\kern-.05em{\sc i\kern-.025em b}\kern-.08em
+    T\kern-.1667em\lower.7ex\hbox{E}\kern-.125emX}}
+
+\begin{document}
+
+\title{Ordinal Thumbnail Baselines and Tile-Pipeline Debugging for PANDA ISUP Grading}
+
+\author{
+\IEEEauthorblockN{First Author}
+\IEEEauthorblockA{\textit{AI in Medical Imaging} \\
+\textit{Radboud University} \\
+Nijmegen, The Netherlands \\
+first.author@ru.nl}
+\and
+\IEEEauthorblockN{Second Author}
+\IEEEauthorblockA{\textit{AI in Medical Imaging} \\
+\textit{Radboud University} \\
+Nijmegen, The Netherlands \\
+second.author@ru.nl}
+\and
+\IEEEauthorblockN{Third Author}
+\IEEEauthorblockA{\textit{AI in Medical Imaging} \\
+\textit{Radboud University} \\
+Nijmegen, The Netherlands \\
+third.author@ru.nl}
+}
+
+\maketitle
+
+\begin{abstract}
+We study prostate cancer grade prediction on the PANDA challenge dataset using a lightweight and reproducible EfficientNet training pipeline. Our goal was to establish a reliable 5-fold baseline on pre-resized slide thumbnails and then test whether a tile-based model could surpass it. Using 10,616 training slides with a shared 5-fold split stratified by ISUP grade and data provider, the best current thumbnail model is EfficientNet-B0 with ordinal binary cross-entropy, reaching a recovered out-of-fold quadratic-weighted kappa (QWK) of 0.7244. This outperforms the comparable SmoothL1 baseline at 0.7147 and the MSE baseline at 0.7030. Initial tile experiments underperformed the thumbnail baseline, but a full artifact audit showed that the 36-tile inputs were invalid: each slide contained a mean of only 5.356 real tissue tiles and 30.644 blank padded tiles, with a maximum of nine real tiles. This matches a 512x512 thumbnail source tiled at 192 pixels rather than true whole-slide input. We therefore do not treat the current tile sweep as evidence against tile models and defer 5-fold tile training until TIFF-derived tiles are regenerated. The main outcome of the project is a stable ordinal thumbnail baseline and a documented preprocessing guardrail for future tile experiments.
+\end{abstract}
+
+\begin{IEEEkeywords}
+prostate cancer, whole-slide imaging, PANDA, ISUP grading, ordinal regression
+\end{IEEEkeywords}
+
+\section{Introduction}
+Automatic grading of prostate biopsy slides is a clinically relevant computer vision problem because treatment decisions depend strongly on the assigned Gleason pattern and ISUP grade. The PANDA challenge provides a large benchmark for this task using digitized hematoxylin and eosin whole-slide images from Radboud University Medical Center and Karolinska Institute \cite{panda,bulten}. Since whole-slide images are too large to process directly with standard convolutional backbones, practical systems typically either downsample each slide into a coarse thumbnail or extract a set of tissue-rich tiles.
+
+Strong PANDA competition solutions relied on tile selection, tile pooling, and multi-model ensembling \cite{team_pnd}. In this project we aimed to reproduce the most important parts of that workflow while keeping the training code simple enough to run inside a course-project setting with Kaggle notebooks as the compute layer. The first question was which single-image thumbnail baseline should anchor the project. The second was whether a tile pipeline could beat that baseline once the repository supported tile artifacts and tile-mode training.
+
+The project ultimately produced two useful outcomes. First, we established a stable 5-fold thumbnail baseline and found that ordinal training is better than standard regression losses for this setup. Second, we showed that the apparent failure of the tile pipeline was caused by bad input artifacts rather than by the tile model itself. This report summarizes the implemented pipeline, the main experiments, and the artifact audit that changed the project direction.
+
+\section{Methods}
+\subsection{Data and Evaluation}
+All experiments use the PANDA training split distributed through Kaggle \cite{panda}. Our shared fold file contains 10,616 slides: 5,456 from Karolinska and 5,160 from Radboud. The ISUP distribution is 2,892 slides of grade 0, 2,666 of grade 1, 1,343 of grade 2, 1,242 of grade 3, 1,249 of grade 4, and 1,224 of grade 5. We generated one frozen 5-fold split with \texttt{StratifiedKFold}, stratifying by the joint label of ISUP grade and data provider so that both axes remain balanced in every fold. The five validation folds contain 2,123 or 2,124 slides each.
+
+The primary evaluation metric is quadratic-weighted Cohen's kappa (QWK), which is the official PANDA metric. The public Kaggle leaderboard is no longer available because the competition closed in 2020, so every result in this report is measured on held-out folds rather than on a live leaderboard. This makes the shared fold file the main contract for fair comparison across runs.
+
+\subsection{Input Pipelines}
+The baseline pipeline uses pre-resized 512x512 PNG thumbnails because this input format was stable on Kaggle while TIFF-based whole-slide reading was unreliable in the course environment. Each slide is normalized with ImageNet statistics and augmented during training with horizontal flips, vertical flips, and random 90-degree rotations.
+
+The tile pipeline uses one per-slide artifact file that stores multiple tiles for a slide. The repository supports \texttt{.npy}, \texttt{.npz}, and vertically stacked \texttt{.png} tile artifacts. In tile mode, each sample is returned as a tensor of shape $[N, 3, H, W]$, where $N$ is the number of kept tiles. The intended setting for the project was 36 tiles of size 192x192 extracted from whole-slide images.
+
+\subsection{Models and Training}
+We trained EfficientNet backbones \cite{efficientnet} with a dropout-plus-linear prediction head. The main thumbnail experiments used EfficientNet-B0, and one fold-0 ablation used EfficientNet-B1. The training script supports three losses: SmoothL1, MSE, and ordinal binary cross-entropy. In ordinal mode, the model predicts five ordered thresholds, and the final ISUP estimate is the number of thresholds whose sigmoid output exceeds 0.5.
+
+For tile-mode training, the repository contains a concat-tile-pooling model. Tile batches are reshaped from $[B, N, 3, H, W]$ to $[B\!*\!N, 3, H, W]$, passed through the shared EfficientNet backbone, then reshaped back to $[B, N, F]$. The current implementation masks near-blank tiles using input variance and combines feature-energy attention pooling with max pooling before the prediction head. This makes tile aggregation less sensitive to padded or low-information tiles than a plain mean pool.
+
+All main experiments used Adam with learning rate $3\times10^{-4}$, cosine annealing over optimizer steps, dropout 0.3, and five or six epochs per fold. Mixed precision was enabled on CUDA where available. Model selection for each fold used the best validation QWK.
+
+\section{Results}
+\subsection{Reliable Thumbnail Baselines}
+Table \ref{tab:thumbnail-results} summarizes the reliable thumbnail baselines. The clean 5-fold SmoothL1 rerun reached 0.7116 QWK, while the MSE version dropped to 0.7030. The strongest result in hand is the ordinal EfficientNet-B0 model at 0.7244 QWK from recovered out-of-fold predictions. A clean 5-epoch rerun reached 0.7221, which supports the same ranking even though it was trained for one fewer epoch.
+
+\begin{table*}[t]
+\caption{Main thumbnail and tile results logged during the project. Results labeled as invalid-input tile runs are kept for completeness but should not be interpreted as a fair comparison against thumbnail baselines.}
+\label{tab:thumbnail-results}
+\centering
+\small
+\begin{tabular}{p{2.2cm}p{1.4cm}p{1.3cm}p{1.1cm}p{1.5cm}p{5.9cm}}
+\toprule
+Model & Input & Loss & Epochs & QWK & Notes \\
+\midrule
+EfficientNet-B0 & 512x512 thumbnail & MSE & 6 & 0.7030 OOF & Full 5-fold rerun. \\
+EfficientNet-B0 & 512x512 thumbnail & SmoothL1 & 6 & 0.7116 OOF & Clean 5-fold training rerun. \\
+EfficientNet-B0 & 512x512 thumbnail & Ordinal BCE & 6 & 0.7244 OOF & Best recovered 5-fold OOF file in hand. \\
+EfficientNet-B0 & 512x512 thumbnail & Ordinal BCE & 5 & 0.7221 OOF & Clean 5-fold rerun from saved weights. \\
+EfficientNet-B1 & 512x512 thumbnail & SmoothL1 & 6 & 0.7125 fold 0 & Small fold-0 gain over B0 was not enough to justify a full rerun. \\
+\midrule
+EfficientNet-B0 & 36 tiles, 192 px & Ordinal BCE & 6 & 0.6819 fold 0 & Invalid-input run with only 16 tiles kept at load time. \\
+EfficientNet-B0 & 36 tiles, 192 px & Ordinal BCE & 6 & 0.6676 fold 0 & Invalid-input run with 32 tiles kept at load time. \\
+EfficientNet-B0 & 36 tiles, 192 px & Ordinal BCE & 6 & 0.6720 fold 0 & Invalid-input run with all 36 tiles kept. \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+Fig. \ref{fig:qwk-oof-model-comparison} compares the main out-of-fold thumbnail scores. Within the implemented setup, ordinal training is the only change that clearly improves on the baseline loss family. The fold-0 EfficientNet-B1 test was nearly identical to EfficientNet-B0, so the project did not prioritize a full B1 sweep.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\columnwidth]{qwk_oof_model_comparison.pdf}
+\caption{Global out-of-fold QWK for the main thumbnail baselines. Ordinal BCE is the strongest current thumbnail configuration.}
+\label{fig:qwk-oof-model-comparison}
+\end{figure}
+
+\subsection{Why Ordinal Training Helped}
+Recovered out-of-fold predictions make it possible to compare SmoothL1 and ordinal training directly on the same 5-fold evaluation output. Ordinal BCE improved over SmoothL1 on every fold: 0.7314 vs. 0.7132 on fold 0, 0.7126 vs. 0.7067 on fold 1, 0.7411 vs. 0.7271 on fold 2, 0.7140 vs. 0.7094 on fold 3, and 0.7233 vs. 0.7169 on fold 4.
+
+The confusion matrices in Fig. \ref{fig:confusion-smoothl1-vs-ordinal} explain where that gain comes from. Ordinal training improves the recall of the most clinically distinct grades, especially ISUP 0 and ISUP 5. ISUP 0 recall rose from 60.9\% to 69.5\%, and ISUP 5 recall rose from 23.0\% to 41.3\%. SmoothL1 remained slightly stronger on some middle grades, but the better handling of extremes produced the higher global QWK.
+
+\begin{figure*}[t]
+\centering
+\includegraphics[width=0.92\textwidth]{confusion_matrices_smoothl1_vs_ordinal.pdf}
+\caption{Row-normalized confusion matrices for recovered SmoothL1 and ordinal BCE out-of-fold predictions. Ordinal BCE reduces severe under-calling at ISUP 5 and improves recall at ISUP 0.}
+\label{fig:confusion-smoothl1-vs-ordinal}
+\end{figure*}
+
+\subsection{Tile Underperformance Was a Data Problem}
+At first glance, the tile pipeline looked worse than the thumbnail baseline. The fold-0 tile sweep produced QWK values of 0.6819, 0.6676, and 0.6720 for the 16-, 32-, and 36-tile settings, respectively, all below the fold-0 ordinal thumbnail reference of 0.7314. If taken at face value, this would suggest that the tile model or tile count was poorly chosen.
+
+A full artifact audit showed that this interpretation was wrong. The entire 10,616-slide tile directory was generated from a source that could supply at most nine real tiles per slide at the requested 192-pixel tile size. The audit found a mean of 5.356 real tiles and 30.644 blank padded tiles per 36-tile artifact, with a median of five real tiles and a maximum of nine. This is exactly what one would expect from tiling a 512x512 thumbnail into a 3x3 grid instead of extracting tiles from a whole-slide image. As the tile count increases, the representation becomes increasingly diluted by white padding, which explains why the larger-\(N\) settings were not better.
+
+Fig. \ref{fig:tile-artifact-audit} summarizes this failure mode. Because the input artifacts are invalid, we do not treat the current tile sweep as evidence that tile-based models are inferior. Instead, we added a preprocessing preflight check and an audit script so that future tile directories must prove they can supply the requested number of non-padded tiles before any expensive 5-fold training run starts.
+
+\begin{figure*}[t]
+\centering
+\includegraphics[width=0.92\textwidth]{tile_artifact_audit.pdf}
+\caption{Audit summary for the current tile artifact set. The directory behaves like tiles extracted from 512x512 thumbnails, not from raw whole-slide images, so the resulting tile benchmark is invalid.}
+\label{fig:tile-artifact-audit}
+\end{figure*}
+
+\section{Discussion}
+The strongest reliable model produced during the project is the ordinal EfficientNet-B0 thumbnail baseline. This result is still far below the winning PANDA systems \cite{team_pnd}, which is not surprising because our pipeline omits some of the most expensive ingredients used in high-ranking competition entries, including label-cleaning strategies, larger ensembles, and true whole-slide tile extraction. Still, the ordinal improvement over SmoothL1 is consistent across folds and strong enough to serve as the project's main baseline.
+
+The more important lesson is methodological. Without auditing the tile directory, it would have been easy to conclude that concat-tile-pooling itself was not useful. In reality, the model was being trained on mostly blank tile stacks. This is a good example of why data validation should be treated as a first-class experiment artifact rather than as an implementation detail.
+
+There are several limitations. First, the best ordinal 0.7244 number comes from recovered out-of-fold predictions rather than from a fresh rerun stored in the repository, although the clean 5-epoch rerun at 0.7221 supports the same conclusion. Second, no external validation on PBGG-1 \cite{pbgg1} has been completed yet. Third, the tile family has not been re-tested on a valid TIFF-derived artifact set, so the project cannot yet answer whether tiles would eventually beat thumbnails in this codebase.
+
+The next steps are therefore straightforward: regenerate 36x192 tile artifacts directly from raw TIFF whole-slide images, run the capacity audit before training, compare one fold-0 tile run against the ordinal thumbnail reference, and only then decide whether a full 5-fold tile sweep is worth the compute budget.
+
+\section{Conclusion}
+This project established a reproducible PANDA grading pipeline with a stable 5-fold thumbnail baseline and a clearer understanding of why the initial tile experiments failed. EfficientNet-B0 trained with ordinal binary cross-entropy is the best current single-model family at 0.7244 out-of-fold QWK. The current tile results are not trustworthy because the artifact directory was built from low-capacity thumbnail sources and is dominated by white padding. As a result, the main deliverables are not only a baseline model but also the debugging evidence and preprocessing guardrails needed to make the next tile experiment scientifically meaningful.
+
+\section*{Acknowledgment}
+This report summarizes coursework for the AI in Medical Imaging course at Radboud University and the corresponding repository implementation used for team experiments.
+
+\begin{thebibliography}{00}
+\bibitem{panda} Kaggle, ``Prostate cANcer graDe Assessment (PANDA) Challenge,'' 2020. [Online]. Available: \url{https://www.kaggle.com/c/prostate-cancer-grade-assessment}
+\bibitem{bulten} W. Bulten \textit{et al.}, ``Automated deep-learning system for Gleason grading of prostate cancer using biopsies: a diagnostic study,'' \textit{Nature Medicine}, vol. 26, no. 7, pp. 1038--1044, 2020.
+\bibitem{efficientnet} M. Tan and Q. Le, ``EfficientNet: Rethinking model scaling for convolutional neural networks,'' in \textit{Proc. International Conference on Machine Learning}, 2019, pp. 6105--6114.
+\bibitem{team_pnd} Team PND, ``Kaggle PANDA 1st-place solution,'' GitHub repository. [Online]. Available: \url{https://github.com/kentaroy47/Kaggle-PANDA-1st-place-solution}
+\bibitem{pbgg1} Y. Tolkach \textit{et al.}, ``PBGG-1 external validation dataset,'' Zenodo, 2023. [Online]. Available: \url{https://zenodo.org/records/8102833}
+\end{thebibliography}
+
+\end{document}
