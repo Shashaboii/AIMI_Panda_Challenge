@@ -1,161 +1,417 @@
+
 \documentclass[conference]{IEEEtran}
 \IEEEoverridecommandlockouts
-
 \usepackage{cite}
 \usepackage{amsmath,amssymb,amsfonts}
+\usepackage{algorithmic}
 \usepackage{graphicx}
 \usepackage{textcomp}
 \usepackage{xcolor}
 \usepackage{booktabs}
-\usepackage{array}
-\usepackage{url}
-
-\graphicspath{{../docs/graphics/}{./}}
-
+\usepackage[hidelinks]{hyperref}
 \def\BibTeX{{\rm B\kern-.05em{\sc i\kern-.025em b}\kern-.08em
     T\kern-.1667em\lower.7ex\hbox{E}\kern-.125emX}}
 
+\newcommand{\tofill}[1]{{\color{red}\textbf{[FILL: #1]}}}
+
 \begin{document}
 
-\title{Ordinal Thumbnail Baselines and Tile-Pipeline Debugging for PANDA ISUP Grading}
+\title{Grading Prostate Cancer Severity from Whole-Slide Biopsies on the PANDA Challenge}
 
 \author{
-\IEEEauthorblockN{First Author}
-\IEEEauthorblockA{\textit{AI in Medical Imaging} \\
+\IEEEauthorblockN{Shashanth Markabundu}
+\IEEEauthorblockA{
+\textit{AI in Medical Imaging} \\
 \textit{Radboud University} \\
-Nijmegen, The Netherlands \\
-first.author@ru.nl}
+Nijmegen, Netherlands \\
+shashanth.markabundu@ru.nl
+}
 \and
-\IEEEauthorblockN{Second Author}
-\IEEEauthorblockA{\textit{AI in Medical Imaging} \\
+\IEEEauthorblockN{Francisca  Carneiro}
+\IEEEauthorblockA{
+\textit{AI in Medical Imaging} \\
 \textit{Radboud University} \\
-Nijmegen, The Netherlands \\
-second.author@ru.nl}
+Nijmegen, Netherlands \\
+francisca.carneiro@ru.nl
+}
 \and
-\IEEEauthorblockN{Third Author}
-\IEEEauthorblockA{\textit{AI in Medical Imaging} \\
+\IEEEauthorblockN{Goja Modic Sila}
+\IEEEauthorblockA{
+\textit{AI in Medical Imaging} \\
 \textit{Radboud University} \\
-Nijmegen, The Netherlands \\
-third.author@ru.nl}
+Nijmegen, Netherlands \\
+goja.modicsila@ru.nl
+}
 }
 
 \maketitle
 
 \begin{abstract}
-We study prostate cancer grade prediction on the PANDA challenge dataset using a lightweight and reproducible EfficientNet training pipeline. Our goal was to establish a reliable 5-fold baseline on pre-resized slide thumbnails and then test whether a tile-based model could surpass it. Using 10,616 training slides with a shared 5-fold split stratified by ISUP grade and data provider, the best current thumbnail model is EfficientNet-B0 with ordinal binary cross-entropy, reaching a recovered out-of-fold quadratic-weighted kappa (QWK) of 0.7244. This outperforms the comparable SmoothL1 baseline at 0.7147 and the MSE baseline at 0.7030. Initial tile experiments underperformed the thumbnail baseline, but a full artifact audit showed that the 36-tile inputs were invalid: each slide contained a mean of only 5.356 real tissue tiles and 30.644 blank padded tiles, with a maximum of nine real tiles. This matches a 512x512 thumbnail source tiled at 192 pixels rather than true whole-slide input. We therefore do not treat the current tile sweep as evidence against tile models and defer 5-fold tile training until TIFF-derived tiles are regenerated. The main outcome of the project is a stable ordinal thumbnail baseline and a documented preprocessing guardrail for future tile experiments.
+Prostate cancer is among the most common cancers in men worldwide, and its
+management depends on the ISUP grade (0 to 5) assigned to biopsy whole-slide
+images via the Gleason system. Manual grading is decisive but suffers from
+substantial inter-observer disagreement, which makes consistent automation
+valuable. The PANDA challenge poses two characteristic difficulties. Each image
+is a gigapixel whole-slide scan that must be sampled efficiently, and the
+training labels are imperfect because, unlike the multi-rater test set, they were
+graded by a single pathologist. We compare two modelling paradigms on an
+identical tiling pipeline and an identical ordinal target evaluated with
+quadratic weighted kappa (QWK). The first is the convolutional recipe of the 2020
+challenge era, an EfficientNet-B0 trained on tissue-tile montages. The second is
+the 2024 foundation-model recipe, a frozen pathology vision transformer (UNI)
+used as a tile encoder with a small gated-attention multiple-instance-learning
+head. On a held-out fold of 2124 slides the CNN reached QWK 0.876 and the
+foundation model 0.859, both weaker on Radboud than on Karolinska. A
+deterministic Gleason to ISUP audit of all 10616 training slides found a single
+inconsistent label, locating the residual noise in grading subjectivity rather
+than data entry and explaining why errors cluster on adjacent grades. Critically,
+when the foundation model is trained on one centre and tested on the other its QWK
+falls to 0.485 to 0.649, showing that strong in-distribution accuracy can mask poor
+cross-institutional generalisation. We also document the offline, notebooks-only
+inference engineering that was the project's largest practical hurdle.
 \end{abstract}
 
 \begin{IEEEkeywords}
-prostate cancer, whole-slide imaging, PANDA, ISUP grading, ordinal regression
+computational pathology, prostate cancer, Gleason grading, foundation models,
+multiple instance learning, domain shift, quadratic weighted kappa
 \end{IEEEkeywords}
 
 \section{Introduction}
-Automatic grading of prostate biopsy slides is a clinically relevant computer vision problem because treatment decisions depend strongly on the assigned Gleason pattern and ISUP grade. The PANDA challenge provides a large benchmark for this task using digitized hematoxylin and eosin whole-slide images from Radboud University Medical Center and Karolinska Institute \cite{panda,bulten}. Since whole-slide images are too large to process directly with standard convolutional backbones, practical systems typically either downsample each slide into a coarse thumbnail or extract a set of tissue-rich tiles.
 
-Strong PANDA competition solutions relied on tile selection, tile pooling, and multi-model ensembling \cite{team_pnd}. In this project we aimed to reproduce the most important parts of that workflow while keeping the training code simple enough to run inside a course-project setting with Kaggle notebooks as the compute layer. The first question was which single-image thumbnail baseline should anchor the project. The second was whether a tile pipeline could beat that baseline once the repository supported tile artifacts and tile-mode training.
+Prostate cancer grading on biopsy whole-slide images (WSIs) is summarised by the
+ISUP grade, an ordinal severity score from 0 (benign) to 5 (most aggressive)
+derived from the Gleason pattern. Grading is clinically decisive but suffers from
+substantial inter-observer disagreement among pathologists, which makes it an
+attractive target for automation and, simultaneously, a hard one to supervise
+the ``ground truth'' is itself uncertain. The PANDA challenge \cite{bulten}
+released the largest public corpus for this task and established quadratic
+weighted kappa (QWK) as the metric, because QWK rewards predictions that are close
+on the ordinal scale and penalises being several grades off far more than being
+one grade off.
 
-The project ultimately produced two useful outcomes. First, we established a stable 5-fold thumbnail baseline and found that ordinal training is better than standard regression losses for this setup. Second, we showed that the apparent failure of the tile pipeline was caused by bad input artifacts rather than by the tile model itself. This report summarizes the implemented pipeline, the main experiments, and the artifact audit that changed the project direction.
+Two paradigms bracket this problem. The first, behind the strongest 2020 PANDA
+solutions, trains a convolutional network from scratch on tissue tiles, typically
+stitched into a montage so one forward pass sees a representative sample of the
+slide \cite{tan,baselines}. Its strength is end to end features learned for exactly
+this task. Its weaknesses are documented such that models are data-hungry and
+demonstrably encode site-specific signatures (Howard \textit{et al.} showed CNNs
+can predict the submitting institution from histology alone \cite{howard}), and
+stay sensitive to stain and scanner variation unless explicitly normalised
+\cite{tellez}. The second paradigm, dominant since 2024, uses a foundation
+model. A vision transformer self-supervised on $10^5$+ slides, frozen as a generic
+tile encoder with a light trained head; UNI \cite{chen} and Virchow \cite{virchow}
+are representative. Its strength is reusable representations from little labelled
+data, and its hoped for advantage is robustness from having seen far more
+morphology than any single challenge set. Its weakness is that the frozen encoder
+never adapts to the target domain, and a recent re-annotation benchmark warns such
+models reach high in-distribution accuracy by keying on specimen-specific artefacts
+while transferring poorly across slides \cite{pandaplus}. We adopt UNI as the
+exemplar openly accessible, a ViT-L backbone trained on a large multi-institution
+corpus, with strong reported pathology benchmarks.
 
-\section{Methods}
-\subsection{Data and Evaluation}
-All experiments use the PANDA training split distributed through Kaggle \cite{panda}. Our shared fold file contains 10,616 slides: 5,456 from Karolinska and 5,160 from Radboud. The ISUP distribution is 2,892 slides of grade 0, 2,666 of grade 1, 1,343 of grade 2, 1,242 of grade 3, 1,249 of grade 4, and 1,224 of grade 5. We generated one frozen 5-fold split with \texttt{StratifiedKFold}, stratifying by the joint label of ISUP grade and data provider so that both axes remain balanced in every fold. The five validation folds contain 2,123 or 2,124 slides each.
+The PANDA training data is drawn from two institutions, Radboud and Karolinska
+\cite{strom}, which differ in scanner, pathologist panel and even mask annotation
+scheme. This built-in domain shift turns ``which paradigm generalises better
+across centres?'' into an answerable question rather than a solved one. We
+therefore make three contributions: (i) a data inspection that quantifies class
+imbalance, the two-centre distribution gap, label-scheme differences and a direct
+Gleason-to-ISUP label consistency audit (ii) a controlled comparison of the CNN
+and the frozen foundation model plus MIL head on an identical pipeline, ordinal
+target and metric and (iii) a cross-centre robustness stress-test of the
+foundation model, with a clinically framed error analysis, showing that strong
+in distribution QWK masks a large generalisation gap across institutions. We
+additionally document the offline-inference engineering that the challenge's
+notebooks only submission format demanded.
 
-The primary evaluation metric is quadratic-weighted Cohen's kappa (QWK), which is the official PANDA metric. The public Kaggle leaderboard is no longer available because the competition closed in 2020, so every result in this report is measured on held-out folds rather than on a live leaderboard. This makes the shared fold file the main contract for fair comparison across runs.
+\section{Data and Its Challenges}
 
-\subsection{Input Pipelines}
-The baseline pipeline uses pre-resized 512x512 PNG thumbnails because this input format was stable on Kaggle while TIFF-based whole-slide reading was unreliable in the course environment. Each slide is normalized with ImageNet statistics and augmented during training with horizontal flips, vertical flips, and random 90-degree rotations.
+All experiments use the PANDA training set: 10{,}616 prostate-biopsy WSIs with an
+ISUP grade per slide and, for 10{,}516 of them, a pixel-level mask. Inspecting the
+data before modelling motivates every later design choice.
 
-The tile pipeline uses one per-slide artifact file that stores multiple tiles for a slide. The repository supports \texttt{.npy}, \texttt{.npz}, and vertically stacked \texttt{.png} tile artifacts. In tile mode, each sample is returned as a tensor of shape $[N, 3, H, W]$, where $N$ is the number of kept tiles. The intended setting for the project was 36 tiles of size 192x192 extracted from whole-slide images.
+\textbf{Class imbalance and ordinality.} The ISUP grades are imbalanced toward
+benign and low-grade slides. Plain accuracy would reward predicting the majority
+grade. This is the first reason the metric is QWK and the second reason we adopt
+an ordinal target (Section~III) rather than treating the six grades as unordered
+classes predicting 4 when the truth is 5 must cost less than predicting 0.
 
-\subsection{Models and Training}
-We trained EfficientNet backbones \cite{efficientnet} with a dropout-plus-linear prediction head. The main thumbnail experiments used EfficientNet-B0, and one fold-0 ablation used EfficientNet-B1. The training script supports three losses: SmoothL1, MSE, and ordinal binary cross-entropy. In ordinal mode, the model predicts five ordered thresholds, and the final ISUP estimate is the number of thresholds whose sigmoid output exceeds 0.5.
+\textbf{Two centres are a built-in domain shift.} The slides come from Radboud
+(5{,}160) and Karolinska (5{,}456), on different scanners and pathologists, and
+the two centres have markedly different grade distributions (Fig.~\ref{fig:dist}):
+Karolinska is dominated by benign and ISUP~1 (about 35\% and 33\% of its slides),
+whereas Radboud is far flatter and rises again at ISUP~5 (about 19\%). A model can
+thus exploit centre-specific colour or the centre prior as a shortcut for
+biology---the basis of our cross-centre experiment.
 
-For tile-mode training, the repository contains a concat-tile-pooling model. Tile batches are reshaped from $[B, N, 3, H, W]$ to $[B\!*\!N, 3, H, W]$, passed through the shared EfficientNet backbone, then reshaped back to $[B, N, F]$. The current implementation masks near-blank tiles using input variance and combines feature-energy attention pooling with max pooling before the prediction head. This makes tile aggregation less sensitive to padded or low-information tiles than a plain mean pool.
+\textbf{Label-scheme asymmetry.} Where masks exist (10{,}516 slides), the centres
+annotate incompatibly: Radboud labels individual glands with five tissue classes
+(stroma, benign epithelium, Gleason 3/4/5) while Karolinska distinguishes only
+benign versus cancer---so any mask-based analysis must treat the schemes separately.
 
-All main experiments used Adam with learning rate $3\times10^{-4}$, cosine annealing over optimizer steps, dropout 0.3, and five or six epochs per fold. Mixed precision was enabled on CUDA where available. Model selection for each fold used the best validation QWK.
+\textbf{Train/test artefacts and tissue content.} Training slides carry stray pen
+marks absent from the test set---a train/test difference a model could key on---and
+tissue fraction varies widely (some biopsies are over 98\% background), making the
+most-tissue tile-selection step essential.
 
-\section{Results}
-\subsection{Reliable Thumbnail Baselines}
-Table \ref{tab:thumbnail-results} summarizes the reliable thumbnail baselines. The clean 5-fold SmoothL1 rerun reached 0.7116 QWK, while the MSE version dropped to 0.7030. The strongest result in hand is the ordinal EfficientNet-B0 model at 0.7244 QWK from recovered out-of-fold predictions. A clean 5-epoch rerun reached 0.7221, which supports the same ranking even though it was trained for one fewer epoch.
+\textbf{Label-consistency audit.} ISUP is derived \emph{deterministically} from the
+Gleason score by fixed rules ($3{+}3\!\rightarrow\!1$, $3{+}4\!\rightarrow\!2$,
+$4{+}3\!\rightarrow\!3$, and so on). Computing the expected ISUP for every slide and
+comparing it with the recorded ISUP across all 10{,}616 slides yields only
+\textbf{one} inconsistency (0.01\%; a Karolinska $4{+}3$ slide recorded as ISUP~2
+instead of 3). The recorded labels are therefore internally clean: the
+well-documented PANDA noise comes from \emph{grading subjectivity}, not data-entry
+error. This is compounded by a train/test asymmetry the organisers note---the test
+slides were graded by multiple pathologists whereas the training labels rely on a
+single rater---so the training target is inherently noisier than the benchmark it is
+scored against. Because the labels are internally consistent, we expect, and later
+observe, errors concentrated on \emph{adjacent} grades where pathologists themselves
+disagree.
 
-\begin{table*}[t]
-\caption{Main thumbnail and tile results logged during the project. Results labeled as invalid-input tile runs are kept for completeness but should not be interpreted as a fair comparison against thumbnail baselines.}
-\label{tab:thumbnail-results}
-\centering
-\small
-\begin{tabular}{p{2.2cm}p{1.4cm}p{1.3cm}p{1.1cm}p{1.5cm}p{5.9cm}}
-\toprule
-Model & Input & Loss & Epochs & QWK & Notes \\
-\midrule
-EfficientNet-B0 & 512x512 thumbnail & MSE & 6 & 0.7030 OOF & Full 5-fold rerun. \\
-EfficientNet-B0 & 512x512 thumbnail & SmoothL1 & 6 & 0.7116 OOF & Clean 5-fold training rerun. \\
-EfficientNet-B0 & 512x512 thumbnail & Ordinal BCE & 6 & 0.7244 OOF & Best recovered 5-fold OOF file in hand. \\
-EfficientNet-B0 & 512x512 thumbnail & Ordinal BCE & 5 & 0.7221 OOF & Clean 5-fold rerun from saved weights. \\
-EfficientNet-B1 & 512x512 thumbnail & SmoothL1 & 6 & 0.7125 fold 0 & Small fold-0 gain over B0 was not enough to justify a full rerun. \\
-\midrule
-EfficientNet-B0 & 36 tiles, 192 px & Ordinal BCE & 6 & 0.6819 fold 0 & Invalid-input run with only 16 tiles kept at load time. \\
-EfficientNet-B0 & 36 tiles, 192 px & Ordinal BCE & 6 & 0.6676 fold 0 & Invalid-input run with 32 tiles kept at load time. \\
-EfficientNet-B0 & 36 tiles, 192 px & Ordinal BCE & 6 & 0.6720 fold 0 & Invalid-input run with all 36 tiles kept. \\
-\bottomrule
-\end{tabular}
-\end{table*}
-
-Fig. \ref{fig:qwk-oof-model-comparison} compares the main out-of-fold thumbnail scores. Within the implemented setup, ordinal training is the only change that clearly improves on the baseline loss family. The fold-0 EfficientNet-B1 test was nearly identical to EfficientNet-B0, so the project did not prioritize a full B1 sweep.
-
-\begin{figure}[t]
-\centering
-\includegraphics[width=\columnwidth]{qwk_oof_model_comparison.pdf}
-\caption{Global out-of-fold QWK for the main thumbnail baselines. Ordinal BCE is the strongest current thumbnail configuration.}
-\label{fig:qwk-oof-model-comparison}
+\begin{figure}[tb]
+\centerline{\includegraphics[width=\columnwidth]{fig_distribution.png}}
+\caption{Slides per centre (left) and ISUP distribution within each centre
+(right). The two centres differ sharply---Karolinska skews benign/low-grade,
+Radboud is flatter and higher-grade-heavy---a shortcut a model can exploit.
+Produced by the EDA notebook.}
+\label{fig:dist}
 \end{figure}
 
-\subsection{Why Ordinal Training Helped}
-Recovered out-of-fold predictions make it possible to compare SmoothL1 and ordinal training directly on the same 5-fold evaluation output. Ordinal BCE improved over SmoothL1 on every fold: 0.7314 vs. 0.7132 on fold 0, 0.7126 vs. 0.7067 on fold 1, 0.7411 vs. 0.7271 on fold 2, 0.7140 vs. 0.7094 on fold 3, and 0.7233 vs. 0.7169 on fold 4.
+\section{Methods}
 
-The confusion matrices in Fig. \ref{fig:confusion-smoothl1-vs-ordinal} explain where that gain comes from. Ordinal training improves the recall of the most clinically distinct grades, especially ISUP 0 and ISUP 5. ISUP 0 recall rose from 60.9\% to 69.5\%, and ISUP 5 recall rose from 23.0\% to 41.3\%. SmoothL1 remained slightly stronger on some middle grades, but the better handling of extremes produced the higher global QWK.
+\subsection{Experimental overview}
+The data inspection drives the design: imbalance and ordinality motivate QWK and an
+ordinal target, and the two-centre shift motivates the cross-centre study. All
+experiments share a \emph{single pipeline}---a from-scratch CNN baseline
+(Approach~A), a frozen-foundation-model arm on the same tiles and target
+(Approach~B), and a cross-centre stress-test---so any difference between models is
+attributable to the encoder, not the preprocessing.
 
-\begin{figure*}[t]
-\centering
-\includegraphics[width=0.92\textwidth]{confusion_matrices_smoothl1_vs_ordinal.pdf}
-\caption{Row-normalized confusion matrices for recovered SmoothL1 and ordinal BCE out-of-fold predictions. Ordinal BCE reduces severe under-calling at ISUP 5 and improves recall at ISUP 0.}
-\label{fig:confusion-smoothl1-vs-ordinal}
-\end{figure*}
+\subsection{Shared tiling pipeline}
+Each WSI is read at openslide level~1; the tissue is split into $256\times256$
+tiles and the 36 tiles with the most tissue are kept. This expensive step is run
+\emph{once} and cached: for the CNN the 36 tiles are stitched into a single
+$6\times6$ ($1536\times1536$) montage JPEG; for the foundation model each slide is
+stored as a $36\times1024$ embedding array. Caching converts the dominant
+cost---decoding multi-level TIFFs every epoch---into a one-time operation, which is
+what makes repeated training feasible within the compute budget. One subtlety
+matters: the CNN montages are colour-inverted ($255-\text{pixel}$, following the
+public baseline) whereas the foundation model expects ordinary H\&E,
+ImageNet-normalised and resized to $224$, \emph{not} inverted. Mixing these
+conventions silently destroys accuracy, so they are kept strictly separate.
 
-\subsection{Tile Underperformance Was a Data Problem}
-At first glance, the tile pipeline looked worse than the thumbnail baseline. The fold-0 tile sweep produced QWK values of 0.6819, 0.6676, and 0.6720 for the 16-, 32-, and 36-tile settings, respectively, all below the fold-0 ordinal thumbnail reference of 0.7314. If taken at face value, this would suggest that the tile model or tile count was poorly chosen.
+\subsection{Ordinal target and metric}
+For both models the grade $k$ is encoded as a cumulative vector of length
+five---the first $k$ entries set to one---and the network emits five independent
+logits trained with binary cross-entropy. At inference the predicted grade is the
+rounded sum of the five output sigmoids. This cumulative formulation respects grade
+ordering and directly targets QWK, which is why it is preferred over a six-way
+softmax; the public baselines report it lifting the leaderboard from $\approx0.79$
+(softmax) to $\approx0.87$ (ordinal BCE)---a deliberate, literature-grounded choice
+rather than an inherited default.
 
-A full artifact audit showed that this interpretation was wrong. The entire 10,616-slide tile directory was generated from a source that could supply at most nine real tiles per slide at the requested 192-pixel tile size. The audit found a mean of 5.356 real tiles and 30.644 blank padded tiles per 36-tile artifact, with a median of five real tiles and a maximum of nine. This is exactly what one would expect from tiling a 512x512 thumbnail into a 3x3 grid instead of extracting tiles from a whole-slide image. As the tile count increases, the representation becomes increasingly diluted by white padding, which explains why the larger-\(N\) settings were not better.
+\subsection{Approach A: from-scratch EfficientNet-B0}
+The baseline is an EfficientNet-B0 \cite{tan} with a five-output linear head,
+initialised from ImageNet weights and fine-tuned end-to-end on the inverted
+montages. Training uses Adam (initial learning rate $3\times10^{-4}$), one warm-up
+epoch then cosine annealing, mixed precision, batch size~4, and orientation-only
+augmentation (transpose and flips), appropriate because tissue orientation carries
+no diagnostic meaning; two-view test-time augmentation is applied at inference. The
+original public recipe trains for 30 epochs, but on a single Kaggle GPU this took
+over 11 hours and had to be cut to 20 epochs to fit the session and weekly quota.
+The validation QWK was still rising slowly at that cut-off, so the reported 0.876
+is a floor rather than a converged ceiling---a longer schedule would very likely
+score higher.
 
-Fig. \ref{fig:tile-artifact-audit} summarizes this failure mode. Because the input artifacts are invalid, we do not treat the current tile sweep as evidence that tile-based models are inferior. Instead, we added a preprocessing preflight check and an audit script so that future tile directories must prove they can supply the requested number of non-padded tiles before any expensive 5-fold training run starts.
+\subsection{Approach B: frozen UNI encoder + gated-attention MIL}
+The second model uses UNI \cite{chen}, a ViT-L pathology foundation model, frozen
+as a tile encoder that maps each of the 36 tiles to a 1024-dimensional embedding.
+A slide is thus a bag of 36 instances, and we train only a gated-attention MIL head
+\cite{ilse}: a shared projection, a gated attention mechanism that scores each
+tile, a softmax over tiles, and an attention-weighted sum fed to the same
+five-output ordinal head as Approach~A. Because only the head is trained and the
+encoder is frozen, it converges in minutes from the precomputed embeddings, and the
+attention weights are directly interpretable as which tiles drove a prediction.
 
-\begin{figure*}[t]
-\centering
-\includegraphics[width=0.92\textwidth]{tile_artifact_audit.pdf}
-\caption{Audit summary for the current tile artifact set. The directory behaves like tiles extracted from 512x512 thumbnails, not from raw whole-slide images, so the resulting tile benchmark is invalid.}
-\label{fig:tile-artifact-audit}
-\end{figure*}
+\subsection{Learning strategy and overfitting control}
+We monitor the learning process directly: BCE loss and validation QWK (overall and
+per centre) are logged every epoch. Three observations guide the strategy. (i)
+Training and validation loss fall together with only a small, stable gap, so the
+CNN is \emph{not} overfitting---ImageNet initialisation, orientation augmentation
+and best-checkpoint selection (the highest-QWK epoch, not the last) all regularise.
+(ii) Validation QWK rises steeply and then flattens, but at the 20-epoch compute
+cut-off (Section~III-D) it had \emph{not} fully plateaued; relative to the 30-epoch
+public recipe the model is mildly \emph{underfit}, which is the clearest single
+lever for a higher score. (iii) The per-centre QWK curves separate early, an
+in-training signal of the domain gap quantified later. The MIL head needs different
+control: few trainable parameters on a frozen encoder cannot overfit 8{,}500 slides,
+so dropout ($p=0.25$) suffices. Validation uses fold~0 of a stratified 5-fold split
+(\texttt{random\_state}=42), 2{,}124 held-out slides; the cross-centre study
+re-trains on one centre and tests on the whole other centre, both directions.
+
+\subsection{Inference under the challenge constraints}
+The single largest practical obstacle was \emph{inference}. PANDA is a
+notebooks-only competition: submissions run as Kaggle notebooks with the internet
+disabled and the hidden test set mounted only at run time, and our initial
+experiments would not run there for several reasons, each needing a fix. The 2020
+baseline's dependencies no longer matched the current Kaggle image (its EfficientNet
+source package and multi-level-TIFF reader both failed), so the pipeline was
+re-based on the preinstalled \texttt{timm} backbone and \texttt{openslide} reader.
+Three submission constraints then bind. First, no package may be installed offline,
+so inference uses only those libraries and loads weights from attached Datasets.
+Second, the hidden test set is \emph{not} pre-tiled, so inference must read and tile
+each test TIFF on the fly---the very decoding cost the cache avoids---with tiling and
+inversion identical to training, or the weights misbehave. Third, UNI's gated weights
+cannot be fetched offline, so they were downloaded once and shipped as a private
+Dataset. Reconciling these---and fixing a train/inference weight-name mismatch and a
+tiler bug---is what produced valid offline submissions for both arms.
+
+\section{Results}
+
+\subsection{Training behaviour}
+The CNN's validation QWK climbed from 0.77 at epoch~1 to 0.79 by epoch~3 and on to
+the reported 0.876, with training and validation loss falling together (no
+overfitting signature) and the best-QWK epoch retained. As anticipated in
+Section~III-D, the curve had not plateaued at the 20-epoch compute cut-off, so
+0.876 is a floor rather than a ceiling: the 30-epoch public recipe this arm follows
+scores higher, and a full schedule would recover part of that gap. The per-centre
+split was already visible in the first epochs (epoch~3: Karolinska 0.82 versus
+Radboud 0.68), foreshadowing the domain gap quantified below. The MIL head, by
+contrast, converges in minutes on the precomputed embeddings.
+
+\subsection{In-centre comparison}
+On the held-out fold the from-scratch CNN reaches QWK 0.876 and the frozen
+foundation model 0.859; on the hidden leaderboard they score 0.898/0.875 and
+0.868/0.845 (private/public), preserving the validation ordering. A separate
+submission using the public pre-trained weights scored 0.915, but we report only
+our own model because the challenge requires training to be reproducible; the gap
+to 0.915 is consistent with our shorter, single-fold, compute-limited schedule
+(Section~III-D). The CNN also makes fewer clinically serious errors---43 missed
+cancers and 72 false alarms, versus 62 and 120 for the foundation model---where a
+\emph{missed cancer} is a slide predicted benign that is truly cancerous and a
+\emph{false alarm} the reverse.
+
+\subsection{Per-centre performance}
+Evaluated separately on each centre ($n{=}1{,}111$ Karolinska, $1{,}013$ Radboud),
+both jointly trained models are stronger on Karolinska than on Radboud:
+EfficientNet-B0 scores 0.891 versus 0.835 and the foundation model 0.849 versus
+0.826. Radboud is the harder centre for both, consistent with its finer five-class
+annotation scheme and greater grade diversity.
+
+\subsection{Cross-centre robustness of the foundation model}
+Retraining the foundation-model pipeline on one centre and testing on the entire
+other centre, in both directions (test sets of $n{=}5{,}160$ Radboud and
+$n{=}5{,}456$ Karolinska slides). Performance collapses relative to the
+in-distribution 0.85 range: QWK falls to 0.649 when training on Karolinska and
+testing on Radboud, and to 0.485 in the reverse direction. The transfer is also
+asymmetric---a Karolinska-trained model generalises to Radboud markedly better than
+the reverse---mirroring the per-centre difficulty ordering, and the cross-centre
+confusion matrices show the model mis-binning grades toward the source centre's
+prior rather than scattering randomly.
+
+\subsection{Error analysis}
+The validation confusion matrices (Fig.~\ref{fig:cm}) show both models' errors
+lying overwhelmingly on the diagonal's immediate neighbours: for the foundation
+model 92.7\% of errors are within a single grade, and for the CNN none of the 30
+largest errors coincide with the single audited label inconsistency. Because the
+audit found only one inconsistent label in 10{,}616 slides, these errors cannot be
+data-entry noise; they fall on genuinely ambiguous, adjacent-grade boundaries where
+pathologists disagree---the expected behaviour of a well-trained model against a
+subjective reference standard. This interpretation directly shapes the next
+experiments: because the error is adjacent-grade rather than catastrophic, the
+productive levers are ordinal-target label smoothing and a longer training schedule
+(Section~III-D), not a change of architecture.
+
+\begin{figure}[tb]
+\centerline{\includegraphics[width=0.84\columnwidth]{fig_confusion.png}}
+\caption{Validation confusion matrices for the two models. Errors concentrate on
+adjacent grades, consistent with inter-observer grading variability rather than
+label corruption. Produced by the EDA notebook.}
+\label{fig:cm}
+\end{figure}
 
 \section{Discussion}
-The strongest reliable model produced during the project is the ordinal EfficientNet-B0 thumbnail baseline. This result is still far below the winning PANDA systems \cite{team_pnd}, which is not surprising because our pipeline omits some of the most expensive ingredients used in high-ranking competition entries, including label-cleaning strategies, larger ensembles, and true whole-slide tile extraction. Still, the ordinal improvement over SmoothL1 is consistent across folds and strong enough to serve as the project's main baseline.
 
-The more important lesson is methodological. Without auditing the tile directory, it would have been easy to conclude that concat-tile-pooling itself was not useful. In reality, the model was being trained on mostly blank tile stacks. This is a good example of why data validation should be treated as a first-class experiment artifact rather than as an implementation detail.
+\textbf{The cross-centre collapse is the main finding.} In-centre, the CNN modestly
+beat the frozen foundation model on QWK and serious errors---credible, since the CNN
+is fine-tuned end-to-end while UNI is frozen and never adapts to PANDA. The more
+important result is that UNI, despite its $\approx$0.85 in-distribution QWK, drops to
+0.485--0.649 across centres: high in-distribution accuracy masks poor
+cross-institutional generalisation, the frozen encoder still keying on
+centre-specific appearance rather than transferable biology.
 
-There are several limitations. First, the best ordinal 0.7244 number comes from recovered out-of-fold predictions rather than from a fresh rerun stored in the repository, although the clean 5-epoch rerun at 0.7221 supports the same conclusion. Second, no external validation on PBGG-1 \cite{pbgg1} has been completed yet. Third, the tile family has not been re-tested on a valid TIFF-derived artifact set, so the project cannot yet answer whether tiles would eventually beat thumbnails in this codebase.
+\textbf{Reasons for failure.} \emph{Label subjectivity}: the audit proves labels
+are internally consistent, so adjacent-grade errors reflect real pathologist
+disagreement---a ceiling no model crosses without multi-rater labels.
+\emph{Domain shift}: the centres differ in stain and scanner, so the cross-centre
+drop reflects features that do not transfer. \emph{Information loss}: level-1 tiling
+and JPEG compression of the montage discard detail fine Gleason discrimination may
+need.
 
-The next steps are therefore straightforward: regenerate 36x192 tile artifacts directly from raw TIFF whole-slide images, run the capacity audit before training, compare one fold-0 tile run against the ordinal thumbnail reference, and only then decide whether a full 5-fold tile sweep is worth the compute budget.
+\textbf{Broader context.} The original PANDA paper flagged that
+development-to-external distribution shift caused over-diagnosis \cite{bulten}, and
+recent re-annotation benchmarks report the same artefact-keying \cite{pandaplus}.
+Our 0.485--0.649 cross-centre QWK quantifies that effect inside the public training
+data.
+
+\textbf{Limitations and a results-driven plan.} Two gains need no retraining, since
+the arms share an ordinal head: a weighted average of their continuous scores, and
+QWK-optimised rounding thresholds fitted on the validation fold. The deeper
+questions need new runs, in a findings-driven sequence. First, because the
+foundation model collapsed cross-centre, the immediate experiment is the
+\emph{identical} cross-centre protocol on the CNN---testing whether task-specific
+training confers the robustness the frozen encoder lacked, the single most
+informative missing comparison. Second, Macenko normalisation on both arms would
+isolate how much of the gap is colour rather than morphology. Third, a full-length
+schedule would quantify the headroom the 20-epoch limit cost. Remaining
+limitations---single-fold evaluation, a compressed montage, and a frozen rather than
+fine-tuned encoder---bound the present comparison.
 
 \section{Conclusion}
-This project established a reproducible PANDA grading pipeline with a stable 5-fold thumbnail baseline and a clearer understanding of why the initial tile experiments failed. EfficientNet-B0 trained with ordinal binary cross-entropy is the best current single-model family at 0.7244 out-of-fold QWK. The current tile results are not trustworthy because the artifact directory was built from low-capacity thumbnail sources and is dominated by white padding. As a result, the main deliverables are not only a baseline model but also the debugging evidence and preprocessing guardrails needed to make the next tile experiment scientifically meaningful.
+On PANDA ISUP grading with an identical pipeline and ordinal target, a from-scratch
+EfficientNet-B0 (QWK 0.876, compute-limited to 20 epochs) modestly outperformed a
+frozen UNI encoder with a gated-attention MIL head (0.859) in-centre. A deterministic
+label audit located PANDA's residual noise in grading subjectivity, explaining both
+models' adjacent-grade errors. Stress-testing UNI across centres exposed a large
+generalisation gap (0.485--0.649 versus $\approx$0.85 in-distribution): strong
+in-centre accuracy does not imply cross-institutional robustness. Meeting the
+offline, notebooks-only inference format was the largest engineering hurdle.
 
-\section*{Acknowledgment}
-This report summarizes coursework for the AI in Medical Imaging course at Radboud University and the corresponding repository implementation used for team experiments.
+\section*{Code Availability}
+The repository
+contains eight notebooks in run order. Tile caching, EDA and label audit,
+EfficientNet training, a validation-prediction dump, EfficientNet inference, UNI
+embedding extraction, MIL-head training with the cross-centre study, and UNI
+inference plus a README documenting the Kaggle-Dataset dependencies and the exact
+run settings (GPU, internet, attachments) for each notebook. Both inference
+notebooks reproduce \texttt{submission.csv} offline from saved weights. Code repository:
+\href{https://github.com/Shashaboii/AIMI_Panda_Challenge}{GitHub Repository}
 
 \begin{thebibliography}{00}
-\bibitem{panda} Kaggle, ``Prostate cANcer graDe Assessment (PANDA) Challenge,'' 2020. [Online]. Available: \url{https://www.kaggle.com/c/prostate-cancer-grade-assessment}
-\bibitem{bulten} W. Bulten \textit{et al.}, ``Automated deep-learning system for Gleason grading of prostate cancer using biopsies: a diagnostic study,'' \textit{Nature Medicine}, vol. 26, no. 7, pp. 1038--1044, 2020.
-\bibitem{efficientnet} M. Tan and Q. Le, ``EfficientNet: Rethinking model scaling for convolutional neural networks,'' in \textit{Proc. International Conference on Machine Learning}, 2019, pp. 6105--6114.
-\bibitem{team_pnd} Team PND, ``Kaggle PANDA 1st-place solution,'' GitHub repository. [Online]. Available: \url{https://github.com/kentaroy47/Kaggle-PANDA-1st-place-solution}
-\bibitem{pbgg1} Y. Tolkach \textit{et al.}, ``PBGG-1 external validation dataset,'' Zenodo, 2023. [Online]. Available: \url{https://zenodo.org/records/8102833}
+\bibitem{bulten} W. Bulten, K. Kartasalo, P.-H. C. Chen, \textit{et al.},
+``Artificial intelligence for diagnosis and Gleason grading of prostate cancer: the
+PANDA challenge,'' \textit{Nature Medicine}, vol.~28, pp.~154--163, 2022.
+\bibitem{chen} R. J. Chen, T. Ding, M. Y. Lu, \textit{et al.}, ``Towards a
+general-purpose foundation model for computational pathology,'' \textit{Nature
+Medicine}, vol.~30, pp.~850--862, 2024.
+\bibitem{howard} F. M. Howard, J. Dolezal, S. Kochanny, \textit{et al.}, ``The
+impact of site-specific digital histology signatures on deep learning model
+accuracy and bias,'' \textit{Nature Communications}, vol.~12, art.~4423, 2021.
+\bibitem{tellez} D. Tellez, G. Litjens, P. B\'andi, \textit{et al.}, ``Quantifying
+the effects of data augmentation and stain color normalization in convolutional
+neural networks for computational pathology,'' \textit{Medical Image Analysis},
+vol.~58, art.~101544, 2019.
+\bibitem{virchow} E. Vorontsov, A. Bozkurt, A. Casson, \textit{et al.}, ``A
+foundation model for clinical-grade computational pathology and rare cancer
+detection,'' \textit{Nature Medicine}, vol.~30, pp.~2924--2935, 2024.
+\bibitem{ilse} M. Ilse, J. M. Tomczak, and M. Welling, ``Attention-based deep
+multiple instance learning,'' in \textit{Proc. ICML}, 2018, pp.~2127--2136.
+\bibitem{tan} M. Tan and Q. V. Le, ``EfficientNet: rethinking model scaling for
+convolutional neural networks,'' in \textit{Proc. ICML}, 2019, pp.~6105--6114.
+\bibitem{strom} P. Str\"om, K. Kartasalo, H. Olsson, \textit{et al.},
+``Artificial intelligence for diagnosis and grading of prostate cancer in biopsies:
+a population-based, diagnostic study,'' \textit{Lancet Oncology}, vol.~21, no.~2,
+pp.~222--232, 2020.
+
 \end{thebibliography}
 
 \end{document}
